@@ -10,6 +10,23 @@ from .acp import ACPAgent, ACPAgentParams, acp_connection, bridge_mcp_to_acp
 from .acp._agents.claude_code import interactive_claude_code
 from .acp._agents.codex_cli import interactive_codex_cli
 from .acp._agents.gemini_cli import interactive_gemini_cli
+from .reliability import (
+    BaselineExecutionError,
+    BaselinePhaseConfig,
+    BaselinePhaseResult,
+    BaselineRepeatResult,
+    OrchestratorConcurrency,
+    PhaseShard,
+    ReliabilityHookConfig,
+    ReliabilityRunIdentity,
+    ReliabilitySpec,
+    assert_reliability_hooks_active,
+    build_phase_shards,
+    configure_reliability_hooks,
+    disable_reliability_hooks,
+    preflight_reliability_spec,
+    run_baseline_phase,
+)
 
 try:
     from ._version import __version__
@@ -34,6 +51,21 @@ __all__ = [
     "AgentBinary",
     "SandboxPlatform",
     "CentaurOptions",
+    "ReliabilitySpec",
+    "ReliabilityRunIdentity",
+    "ReliabilityHookConfig",
+    "BaselinePhaseConfig",
+    "BaselineRepeatResult",
+    "BaselinePhaseResult",
+    "BaselineExecutionError",
+    "OrchestratorConcurrency",
+    "PhaseShard",
+    "configure_reliability_hooks",
+    "disable_reliability_hooks",
+    "assert_reliability_hooks_active",
+    "build_phase_shards",
+    "preflight_reliability_spec",
+    "run_baseline_phase",
     "__version__",
     "download_wheels_tarball",
 ]
