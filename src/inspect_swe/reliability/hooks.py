@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from .artifacts import ReliabilityRecord, SidecarWriter
 from .identity import ReliabilityRunIdentity
+from .outcome import outcome_binary_from_value
 from .spec import PhaseName
 
 
@@ -212,13 +213,13 @@ class ReliabilityHooks(Hooks):
 
     def _outcome_payload(self, scores: dict[str, Any]) -> dict[str, Any]:
         values: dict[str, Any] = {}
-        first_numeric: float | None = None
+        first_binary: int | None = None
         for name, score in scores.items():
             value = getattr(score, "value", score)
             values[name] = value
-            if first_numeric is None and isinstance(value, (int, float)):
-                first_numeric = float(value)
-        values["pass"] = first_numeric == 1.0 if first_numeric is not None else None
+            if first_binary is None:
+                first_binary = outcome_binary_from_value(value)
+        values["pass"] = bool(first_binary) if first_binary is not None else None
         return values
 
     def _behavior_payload(self, events: list[Any]) -> dict[str, Any]:

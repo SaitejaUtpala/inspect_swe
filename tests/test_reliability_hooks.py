@@ -41,3 +41,19 @@ def test_identity_agent_prefers_reliability_metadata() -> None:
     )
 
     assert agent == "codex_cli"
+
+
+def test_outcome_payload_maps_gaia_labels_to_pass_boolean() -> None:
+    hooks = ReliabilityHooks()
+    correct = hooks._outcome_payload({"gaia_scorer": "C"})
+    incorrect = hooks._outcome_payload({"gaia_scorer": "I"})
+
+    assert correct["pass"] is True
+    assert incorrect["pass"] is False
+
+
+def test_outcome_payload_keeps_unknown_strings_unmapped() -> None:
+    hooks = ReliabilityHooks()
+    payload = hooks._outcome_payload({"gaia_scorer": "UNKNOWN"})
+
+    assert payload["pass"] is None

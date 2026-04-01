@@ -7,6 +7,11 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .concurrency import OrchestratorConcurrency
+from .perturbations import (
+    FaultPerturbationSpec,
+    PromptPerturbationSpec,
+    StructuralPerturbationSpec,
+)
 
 PhaseName = Literal[
     "baseline",
@@ -43,6 +48,13 @@ class ReliabilitySpec(BaseModel):
     canonical_log_format: Literal["eval"] = "eval"
     strict_identity_tags: bool = True
     fail_on_missing_hooks: bool = True
+    fault_perturbation: FaultPerturbationSpec = Field(default_factory=FaultPerturbationSpec)
+    prompt_perturbation: PromptPerturbationSpec = Field(
+        default_factory=PromptPerturbationSpec
+    )
+    structural_perturbation: StructuralPerturbationSpec = Field(
+        default_factory=StructuralPerturbationSpec
+    )
     concurrency: OrchestratorConcurrency = Field(
         default_factory=OrchestratorConcurrency
     )

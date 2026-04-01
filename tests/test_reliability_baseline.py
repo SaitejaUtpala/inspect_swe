@@ -81,6 +81,10 @@ def test_run_baseline_phase_executes_repeats_and_agents(
     assert first_call["metadata"]["reliability_repeat_id"] == 0
     assert first_call["metadata"]["reliability_agent_attempt_id"] == 0
     assert "campaign_a" in first_call["log_dir"]
+    assert first_call["log_dir"].endswith(
+        "swe_bench_verified/codex_cli/"
+        "swe_bench_verified_codex_cli_baseline_rep_000_campaign_a"
+    )
     assert result.campaign_id == "campaign_a"
     assert "campaign_a" in result.sidecar_path
 

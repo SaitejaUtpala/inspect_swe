@@ -65,3 +65,37 @@ def load_sidecar_records(path: str | Path) -> list[ReliabilityRecord]:
             data = json.loads(line)
             records.append(ReliabilityRecord.model_validate(data))
     return records
+
+
+def campaign_json_path(sidecar_path: str | Path) -> Path:
+    """Return campaign-scoped pretty JSON path for a sidecar JSONL path."""
+    path = Path(sidecar_path)
+    if path.suffix == ".jsonl":
+        return path.with_suffix(".json")
+    return path.with_name(f"{path.name}.json")
+
+
+def write_campaign_json(
+    *,
+    sidecar_path: str | Path,
+    phase: str,
+    benchmark: str,
+    campaign_id: str,
+) -> str:
+    """Materialize a pretty JSON campaign artifact from sidecar JSONL."""
+    records = load_sidecar_records(sidecar_path)
+    payload = {
+        "artifact_type": "inspect_swe_reliability_campaign_sidecar",
+        "artifact_version": 1,
+        "phase": phase,
+        "benchmark": benchmark,
+        "campaign_id": campaign_id,
+        "record_count": len(records),
+        "records": [record.model_dump(mode="json", warnings=False) for record in records],
+    }
+    target = campaign_json_path(sidecar_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+        f.write("\n")
+    return str(target)

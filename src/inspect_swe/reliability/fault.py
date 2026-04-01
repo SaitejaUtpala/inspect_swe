@@ -1,4 +1,4 @@
-"""Baseline reliability phase execution."""
+"""Fault reliability phase execution scaffolding."""
 
 from __future__ import annotations
 
@@ -18,16 +18,17 @@ from .artifacts import (
 from .hooks import ReliabilityHookConfig, configure_reliability_hooks
 from .orchestrator import preflight_reliability_spec
 from .paths import campaign_sidecar_path, repeat_log_dir
+from .perturbations import FaultPerturbationSpec
 from .spec import ReliabilitySpec
 from .telemetry import TelemetryCoverageReport, assess_sidecar_coverage
 
 
-class BaselineExecutionError(RuntimeError):
-    """Raised when baseline execution violates reliability constraints."""
+class FaultExecutionError(RuntimeError):
+    """Raised when fault phase execution violates reliability constraints."""
 
 
-class BaselinePhaseConfig(BaseModel):
-    """Options for baseline phase execution."""
+class FaultPhaseConfig(BaseModel):
+    """Options for fault phase execution."""
 
     repeats: int = Field(default=5, ge=1)
     campaign_id: str | None = None
@@ -36,6 +37,7 @@ class BaselinePhaseConfig(BaseModel):
     model: str | None = None
     solver: Any | None = None
     task_args: dict[str, Any] = Field(default_factory=dict)
+    bridged_tools: Any | None = None
     inject_agent_task_arg: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)
     sandbox: str | None = None
@@ -44,6 +46,7 @@ class BaselinePhaseConfig(BaseModel):
     verify_telemetry: bool = True
     fail_on_incomplete_telemetry: bool = True
     configure_hooks: bool = True
+    perturbation: FaultPerturbationSpec = Field(default_factory=FaultPerturbationSpec)
 
     @field_validator("campaign_id")
     @classmethod
@@ -56,8 +59,8 @@ class BaselinePhaseConfig(BaseModel):
         return cleaned
 
 
-class BaselineRepeatResult(BaseModel):
-    """One baseline repeat execution summary."""
+class FaultRepeatResult(BaseModel):
+    """One fault repeat execution summary."""
 
     agent: str
     repeat_id: int
@@ -69,28 +72,29 @@ class BaselineRepeatResult(BaseModel):
     identity_warning_count: int
 
 
-class BaselinePhaseResult(BaseModel):
-    """Complete baseline phase execution summary."""
+class FaultPhaseResult(BaseModel):
+    """Complete fault phase execution summary."""
 
     benchmark: str
     repeats: int
     campaign_id: str
     sidecar_path: str
     campaign_json_path: str | None = None
-    results: list[BaselineRepeatResult]
+    perturbation: FaultPerturbationSpec
+    results: list[FaultRepeatResult]
 
 
-def run_baseline_phase(
+def run_fault_phase(
     *,
     spec: ReliabilitySpec,
     tasks: Any,
-    config: BaselinePhaseConfig | None = None,
-) -> BaselinePhaseResult:
-    """Run K independent baseline repeats for all agents in the spec."""
-    config = config or BaselinePhaseConfig()
-    if "baseline" not in spec.phases:
-        raise BaselineExecutionError(
-            "ReliabilitySpec does not include baseline phase; refusing baseline run."
+    config: FaultPhaseConfig | None = None,
+) -> FaultPhaseResult:
+    """Run K independent fault repeats for all agents in the spec."""
+    config = config or FaultPhaseConfig()
+    if "fault" not in spec.phases:
+        raise FaultExecutionError(
+            "ReliabilitySpec does not include fault phase; refusing fault run."
         )
 
     campaign_id = config.campaign_id or _default_campaign_id()
@@ -106,7 +110,7 @@ def run_baseline_phase(
 
     preflight_reliability_spec(spec)
 
-    repeat_results: list[BaselineRepeatResult] = []
+    repeat_results: list[FaultRepeatResult] = []
     for agent in spec.agents:
         for repeat_id in range(config.repeats):
             logs = _run_single_repeat(
@@ -123,7 +127,7 @@ def run_baseline_phase(
                 sidecar_path=sidecar_path,
                 agent=agent,
                 repeat_id=repeat_id,
-                phase="baseline",
+                phase="fault",
             )
 
             if (
@@ -131,15 +135,15 @@ def run_baseline_phase(
                 and config.fail_on_incomplete_telemetry
                 and not coverage.complete
             ):
-                raise BaselineExecutionError(
-                    "Incomplete reliability telemetry detected for baseline repeat "
+                raise FaultExecutionError(
+                    "Incomplete reliability telemetry detected for fault repeat "
                     f"(agent={agent}, repeat_id={repeat_id}): "
                     f"missing_sample_uuids={coverage.missing_sample_uuids}, "
                     f"duplicate_identity_keys={coverage.duplicate_identity_keys}"
                 )
 
             repeat_results.append(
-                BaselineRepeatResult(
+                FaultRepeatResult(
                     agent=agent,
                     repeat_id=repeat_id,
                     run_ids=[log.eval.run_id for log in logs],
@@ -153,23 +157,24 @@ def run_baseline_phase(
 
     campaign_json_path = write_campaign_json(
         sidecar_path=sidecar_path,
-        phase="baseline",
+        phase="fault",
         benchmark=spec.benchmark,
         campaign_id=campaign_id,
     )
 
-    return BaselinePhaseResult(
+    return FaultPhaseResult(
         benchmark=spec.benchmark,
         repeats=config.repeats,
         campaign_id=campaign_id,
         sidecar_path=sidecar_path,
         campaign_json_path=campaign_json_path,
+        perturbation=config.perturbation,
         results=repeat_results,
     )
 
 
 def _resolve_sidecar_path(
-    spec: ReliabilitySpec, config: BaselinePhaseConfig, campaign_id: str
+    spec: ReliabilitySpec, config: FaultPhaseConfig, campaign_id: str
 ) -> str:
     if config.sidecar_path:
         return config.sidecar_path
@@ -177,7 +182,7 @@ def _resolve_sidecar_path(
         campaign_sidecar_path(
             log_root=config.log_root,
             benchmark=spec.benchmark,
-            phase="baseline",
+            phase="fault",
             campaign_id=campaign_id,
             sidecar_filename="records.jsonl",
         )
@@ -188,7 +193,7 @@ def _run_single_repeat(
     *,
     spec: ReliabilitySpec,
     tasks: Any,
-    config: BaselinePhaseConfig,
+    config: FaultPhaseConfig,
     campaign_id: str,
     agent: str,
     repeat_id: int,
@@ -197,7 +202,7 @@ def _run_single_repeat(
         log_root=config.log_root,
         benchmark=spec.benchmark,
         agent=agent,
-        phase="baseline",
+        phase="fault",
         repeat_id=repeat_id,
         campaign_id=campaign_id,
     )
@@ -209,14 +214,21 @@ def _run_single_repeat(
     run_metadata = dict(config.metadata)
     run_metadata.update(
         {
-            "reliability_phase": "baseline",
+            "reliability_phase": "fault",
             "reliability_campaign_id": campaign_id,
             "reliability_repeat_id": repeat_id,
             "reliability_agent_attempt_id": 0,
             "reliability_agent": agent,
             "reliability_benchmark": spec.benchmark,
             "reliability_seed": spec.seed,
+            **config.perturbation.metadata_tags(default_seed=spec.seed),
         }
+    )
+
+    generate_filter = config.perturbation.build_generate_filter(default_seed=spec.seed)
+    bridged_tools = config.perturbation.build_bridged_tools(
+        bridged_tools=config.bridged_tools,
+        default_seed=spec.seed,
     )
 
     eval_kwargs: dict[str, Any] = {
@@ -238,7 +250,12 @@ def _run_single_repeat(
         eval_kwargs["task_args"] = run_task_args
     if config.model is not None:
         eval_kwargs["model"] = config.model
-    solver = config.solver or _default_solver_for_agent(agent)
+
+    solver = config.solver or _default_solver_for_agent(
+        agent,
+        generate_filter=generate_filter,
+        bridged_tools=bridged_tools,
+    )
     if solver is not None:
         eval_kwargs["solver"] = solver
     if spec.concurrency.max_connections is not None:
@@ -255,23 +272,25 @@ def _run_single_repeat(
     return logs
 
 
-def _default_solver_for_agent(agent: str) -> Any | None:
+def _default_solver_for_agent(
+    agent: str, *, generate_filter: Any, bridged_tools: Any
+) -> Any | None:
     if agent == "codex_cli":
         from inspect_swe._codex_cli.codex_cli import codex_cli
 
-        return codex_cli()
+        return codex_cli(filter=generate_filter, bridged_tools=bridged_tools)
     if agent == "claude_code":
         from inspect_swe._claude_code.claude_code import claude_code
 
-        return claude_code()
+        return claude_code(filter=generate_filter, bridged_tools=bridged_tools)
     if agent == "gemini_cli":
         from inspect_swe._gemini_cli.gemini_cli import gemini_cli
 
-        return gemini_cli()
+        return gemini_cli(filter=generate_filter, bridged_tools=bridged_tools)
     if agent == "mini_swe_agent":
         from inspect_swe._mini_swe_agent.mini_swe_agent import mini_swe_agent
 
-        return mini_swe_agent()
+        return mini_swe_agent(filter=generate_filter, bridged_tools=bridged_tools)
     return None
 
 
