@@ -96,3 +96,55 @@ async def test_prompt_rewrite_llm_mode_falls_back_on_empty_output(
     messages = [SimpleNamespace(role="user", content=original)]
     output = await generate_filter("openai/gpt-5.4", messages, [], None, None)
     assert output is None
+
+
+@pytest.mark.anyio
+async def test_prompt_message_transform_rewrites_agent_visible_messages() -> None:
+    spec = PromptPerturbationSpec(
+        enabled=True,
+        mode="rewrite_v1",
+        variant_count=2,
+        seed=11,
+    )
+    transform = spec.build_message_transform(default_seed=0)
+    assert transform is not None
+
+    user = SimpleNamespace(role="user", content="solve this task")
+    state = SimpleNamespace(messages=[SimpleNamespace(role="system", content="be helpful"), user], metadata={})
+
+    updated = await transform(state)
+
+    assert updated is state
+    assert updated.messages[1].content != "solve this task"
+    assert updated.messages[1].content.startswith("[INSPECT_SWE_PROMPT_VARIANT_")
+    assert updated.metadata["reliability_perturbation_prompt_applied"] is True
+
+
+@pytest.mark.anyio
+async def test_prompt_message_transform_llm_mode_uses_inspect_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeRewriter:
+        async def generate(self, input: Any, config: Any) -> Any:
+            return SimpleNamespace(completion="Please solve this task carefully.")
+
+    monkeypatch.setattr(
+        "inspect_swe.reliability.perturbations.prompt.get_model",
+        lambda model_name: _FakeRewriter(),
+    )
+
+    spec = PromptPerturbationSpec(
+        enabled=True,
+        mode="rewrite_llm_v1",
+        rewrite_model="openai/gpt-4o-mini",
+    )
+    transform = spec.build_message_transform(default_seed=0)
+    assert transform is not None
+
+    state = SimpleNamespace(
+        model="openai/gpt-5.4",
+        messages=[SimpleNamespace(role="user", content="solve this task")],
+        metadata={},
+    )
+    updated = await transform(state)
+    assert updated.messages[0].content == "Please solve this task carefully."

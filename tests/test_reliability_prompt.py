@@ -53,7 +53,7 @@ def test_run_prompt_phase_executes_repeats_and_sets_prompt_metadata(
     )
     monkeypatch.setattr(
         "inspect_swe.reliability.prompt._default_solver_for_agent",
-        lambda agent, generate_filter: None,
+        lambda agent, message_transform: None,
     )
 
     spec = ReliabilitySpec(
@@ -114,7 +114,7 @@ def test_run_prompt_phase_fails_on_incomplete_telemetry(
     )
     monkeypatch.setattr(
         "inspect_swe.reliability.prompt._default_solver_for_agent",
-        lambda agent, generate_filter: None,
+        lambda agent, message_transform: None,
     )
 
     spec = ReliabilitySpec(

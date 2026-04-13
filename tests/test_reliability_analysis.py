@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 from inspect_swe.reliability.analysis import (
+    CampaignResourceSummary,
+    _resource_summary_from_eval_logs,
     analyze_baseline_campaign,
     analyze_reliability_campaign,
 )
@@ -302,6 +306,111 @@ def test_analyze_reliability_campaign_computes_cross_phase_metrics(
     assert result.safety.violation_count == 1
     assert result.abstention.abstention_count == 1
     assert result.abstention.selective_accuracy is not None
+
+
+def test_analyze_reliability_campaign_prefers_eval_records(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    benchmark = "gaia_level1"
+    campaign_id = "campaign_eval_first"
+
+    def _fake_phase_records_from_eval_logs(
+        **kwargs: Any,
+    ) -> tuple[list[ReliabilityRecord], CampaignResourceSummary]:
+        phase = kwargs["phase"]
+        if phase != "baseline":
+            return [], CampaignResourceSummary()
+        return (
+            [
+                _campaign_record(
+                    phase="baseline",
+                    run_id="eval-run-0",
+                    sample_id="a",
+                    repeat_id=0,
+                    passed=True,
+                    confidence=0.9,
+                    safety_violation=False,
+                    abstained=False,
+                    campaign_id=campaign_id,
+                )
+            ],
+            CampaignResourceSummary(
+                started_at="2026-04-10T10:00:00+00:00",
+                completed_at="2026-04-10T10:00:12+00:00",
+                wall_time_sec=12.0,
+                working_time_sec=5.0,
+                total_cost_usd=0.25,
+                input_tokens=100,
+                output_tokens=20,
+                cache_read_tokens=300,
+                cache_write_tokens=10,
+                reasoning_tokens=5,
+                total_tokens=1234,
+            ),
+        )
+
+    monkeypatch.setattr(
+        "inspect_swe.reliability.analysis._phase_records_from_eval_logs",
+        _fake_phase_records_from_eval_logs,
+    )
+
+    result = analyze_reliability_campaign(
+        log_root=str(tmp_path),
+        benchmark=benchmark,
+        campaign_id=campaign_id,
+        agent="codex_cli",
+    )
+
+    assert result.phase_summaries["baseline"].source == "eval"
+    assert result.phase_summaries["baseline"].accuracy == 1.0
+    assert result.resources.started_at == "2026-04-10T10:00:00+00:00"
+    assert result.resources.completed_at == "2026-04-10T10:00:12+00:00"
+    assert result.resources.wall_time_sec == 12.0
+    assert result.resources.total_cost_usd == 0.25
+    assert result.resources.input_tokens == 100
+    assert result.resources.output_tokens == 20
+    assert result.resources.cache_read_tokens == 300
+    assert result.resources.cache_write_tokens == 10
+    assert result.resources.reasoning_tokens == 5
+    assert result.resources.total_tokens == 1234
+    assert any("no records found for phase=fault" in note for note in result.notes)
+
+
+def test_resource_summary_from_eval_logs_computes_timestamps_and_fallback_cost() -> None:
+    usage = SimpleNamespace(
+        input_tokens=1_000_000,
+        output_tokens=2_000_000,
+        total_tokens=3_500_000,
+        input_tokens_cache_write=None,
+        input_tokens_cache_read=500_000,
+        reasoning_tokens=250_000,
+        total_cost=None,
+    )
+    eval_log = SimpleNamespace(
+        stats=SimpleNamespace(
+            started_at="2026-04-10T10:00:00+00:00",
+            completed_at="2026-04-10T10:02:00+00:00",
+            model_usage={"openai/gpt-5.4-2026-03-05": usage},
+        ),
+        samples=[
+            SimpleNamespace(working_time=40.0),
+            SimpleNamespace(working_time=20.0),
+        ],
+    )
+
+    summary = _resource_summary_from_eval_logs([eval_log])
+
+    assert summary.started_at == "2026-04-10T10:00:00+00:00"
+    assert summary.completed_at == "2026-04-10T10:02:00+00:00"
+    assert summary.wall_time_sec == 120.0
+    assert summary.working_time_sec == 60.0
+    assert summary.input_tokens == 1_000_000
+    assert summary.output_tokens == 2_000_000
+    assert summary.cache_read_tokens == 500_000
+    assert summary.cache_write_tokens is None
+    assert summary.reasoning_tokens == 250_000
+    assert summary.total_tokens == 3_500_000
+    assert summary.total_cost_usd == 32.625
 
 
 def _campaign_record(

@@ -107,6 +107,67 @@ class PromptPerturbationSpec(BaseModel):
 
         return _prompt_rewrite_filter
 
+    def build_message_transform(self, *, default_seed: int) -> Any | None:
+        """Build state-message rewrite transform for agent-visible prompts."""
+        if not self.effective_enabled():
+            return None
+        if self.mode == "noop":
+            return None
+
+        seed = self.seed if self.seed is not None else default_seed
+        rewrite_cache: dict[str, str] = {}
+
+        async def _prompt_message_transform(state: Any) -> Any:
+            messages = list(getattr(state, "messages", []) or [])
+            first_user_idx = _first_user_index(messages)
+            if first_user_idx is None:
+                return state
+
+            message = messages[first_user_idx]
+            content = getattr(message, "content", None)
+            if not isinstance(content, str) or not content.strip():
+                return state
+
+            sample_key = _sample_key(messages)
+            variant_index = _variant_index(
+                seed=seed,
+                sample_key=sample_key,
+                variant_count=self.variant_count,
+            )
+            if self.mode == "rewrite_v1":
+                rewritten = _rewrite_prompt_text(content, variant_index=variant_index)
+            elif self.mode == "rewrite_llm_v1":
+                cache_key = f"{sample_key}:{variant_index}"
+                rewritten = rewrite_cache.get(cache_key)
+                if rewritten is None:
+                    rewritten = await _rewrite_prompt_text_llm(
+                        content,
+                        variant_index=variant_index,
+                        model=getattr(state, "model", "inspect"),
+                        rewrite_model=self.rewrite_model,
+                        rewrite_temperature=self.rewrite_temperature,
+                        rewrite_max_tokens=self.rewrite_max_tokens,
+                        rewrite_strength=self.rewrite_strength,
+                    )
+                    rewrite_cache[cache_key] = rewritten
+            else:
+                return state
+
+            if rewritten == content:
+                return state
+
+            updated_messages = list(messages)
+            updated_messages[first_user_idx] = _copy_message_with_content(message, rewritten)
+            state.messages = updated_messages
+
+            metadata = dict(getattr(state, "metadata", {}) or {})
+            metadata["reliability_perturbation_prompt_applied"] = True
+            metadata["reliability_perturbation_prompt_variant_index"] = variant_index
+            state.metadata = metadata
+            return state
+
+        return _prompt_message_transform
+
 
 def _first_user_index(messages: list[Any]) -> int | None:
     for idx, message in enumerate(messages):

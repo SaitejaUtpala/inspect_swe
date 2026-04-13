@@ -16,8 +16,10 @@ from .phase_core import (
     build_phase_metadata,
     configure_hooks_for_phase,
     default_campaign_id,
+    execute_phase_repeats,
     resolve_phase_sidecar_path,
     run_eval_for_repeat,
+    summarize_phase_executions,
 )
 from .solver_factory import default_solver_for_agent
 from .spec import ReliabilitySpec
@@ -105,50 +107,36 @@ def run_baseline_phase(
 
     preflight_reliability_spec(spec)
 
-    repeat_results: list[BaselineRepeatResult] = []
-    for agent in spec.agents:
-        for repeat_id in range(config.repeats):
-            logs = _run_single_repeat(
-                spec=spec,
-                tasks=tasks,
-                config=config,
-                campaign_id=campaign_id,
-                agent=agent,
-                repeat_id=repeat_id,
-            )
-
-            coverage = _assess_repeat_coverage(
-                logs=logs,
-                sidecar_path=sidecar_path,
-                agent=agent,
-                repeat_id=repeat_id,
-                phase="baseline",
-            )
-
-            if (
-                config.verify_telemetry
-                and config.fail_on_incomplete_telemetry
-                and not coverage.complete
-            ):
-                raise BaselineExecutionError(
-                    "Incomplete reliability telemetry detected for baseline repeat "
-                    f"(agent={agent}, repeat_id={repeat_id}): "
-                    f"missing_sample_uuids={coverage.missing_sample_uuids}, "
-                    f"duplicate_identity_keys={coverage.duplicate_identity_keys}"
-                )
-
-            repeat_results.append(
-                BaselineRepeatResult(
-                    agent=agent,
-                    repeat_id=repeat_id,
-                    run_ids=[log.eval.run_id for log in logs],
-                    log_paths=[log.location for log in logs if log.location],
-                    coverage_complete=coverage.complete,
-                    missing_sample_uuids=coverage.missing_sample_uuids,
-                    duplicate_identity_keys=coverage.duplicate_identity_keys,
-                    identity_warning_count=coverage.identity_warning_count,
-                )
-            )
+    executions = execute_phase_repeats(
+        agents=list(spec.agents),
+        repeats=config.repeats,
+        verify_telemetry=config.verify_telemetry,
+        fail_on_incomplete_telemetry=config.fail_on_incomplete_telemetry,
+        run_single_repeat=lambda agent, repeat_id: _run_single_repeat(
+            spec=spec,
+            tasks=tasks,
+            config=config,
+            campaign_id=campaign_id,
+            agent=agent,
+            repeat_id=repeat_id,
+        ),
+        assess_repeat_coverage=lambda logs, agent, repeat_id: _assess_repeat_coverage(
+            logs=logs,
+            sidecar_path=sidecar_path,
+            agent=agent,
+            repeat_id=repeat_id,
+            phase="baseline",
+        ),
+        on_incomplete_telemetry=lambda agent, repeat_id, coverage: BaselineExecutionError(
+            "Incomplete reliability telemetry detected for baseline repeat "
+            f"(agent={agent}, repeat_id={repeat_id}): "
+            f"missing_sample_uuids={coverage.missing_sample_uuids}, "
+            f"duplicate_identity_keys={coverage.duplicate_identity_keys}"
+        ),
+    )
+    repeat_results = [
+        BaselineRepeatResult(**row) for row in summarize_phase_executions(executions)
+    ]
 
     campaign_json_path = write_campaign_json(
         sidecar_path=sidecar_path,

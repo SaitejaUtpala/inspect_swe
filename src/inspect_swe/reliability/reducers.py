@@ -12,12 +12,13 @@ from inspect_ai.scorer import Score, ValueToFloat, score_reducer, value_to_float
 def outcome_consistency_reducer(
     *,
     epsilon: float = 1e-8,
-    value_to_float_fn: ValueToFloat = value_to_float(),
+    value_to_float_fn: ValueToFloat | None = None,
 ):
     """Compute consistency score across repeated binary outcomes."""
+    converter = value_to_float_fn or value_to_float()
 
     def reduce(scores: list[Score]) -> Score:
-        values = [1 if value_to_float_fn(score.value) >= 0.5 else 0 for score in scores]
+        values = [1 if converter(score.value) >= 0.5 else 0 for score in scores]
         if len(values) < 2:
             return Score(value=1.0)
         p_hat = fmean(float(value) for value in values)
@@ -32,12 +33,13 @@ def outcome_consistency_reducer(
 @score_reducer(name="confidence_stability")
 def confidence_stability_reducer(
     *,
-    value_to_float_fn: ValueToFloat = value_to_float(),
+    value_to_float_fn: ValueToFloat | None = None,
 ):
     """Compute confidence stability across repeated runs."""
+    converter = value_to_float_fn or value_to_float()
 
     def reduce(scores: list[Score]) -> Score:
-        values = [float(value_to_float_fn(score.value)) for score in scores]
+        values = [float(converter(score.value)) for score in scores]
         if len(values) < 2:
             return Score(value=1.0)
         if len(set(values)) == 1:

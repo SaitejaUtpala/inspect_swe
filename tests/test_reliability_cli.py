@@ -242,7 +242,7 @@ def test_cli_analyze_uses_default_campaign_sidecar_path(
     assert code == 0
     assert (
         captured["sidecar_path"]
-        == "logs/reliability/gaia_level1/gaia_level1_baseline_gaia_k3_ms3_r3_run1_records.jsonl"
+        == "logs/reliability/gaia_k3_ms3_r3_run1/gaia_level1/gaia_level1_baseline_gaia_k3_ms3_r3_run1_records.jsonl"
     )
     assert captured["benchmark"] == "gaia_level1"
     assert captured["campaign_id"] == "gaia_k3_ms3_r3_run1"
@@ -295,12 +295,18 @@ def test_cli_analyze_all_phases_uses_campaign_analyzer(
     captured: dict[str, Any] = {}
 
     def _fake_analyze_reliability_campaign(
-        *, log_root: str, benchmark: str, campaign_id: str, agent: str | None
+        *,
+        log_root: str,
+        benchmark: str,
+        campaign_id: str,
+        agent: str | None,
+        source: str,
     ) -> CampaignAnalysisResult:
         captured["log_root"] = log_root
         captured["benchmark"] = benchmark
         captured["campaign_id"] = campaign_id
         captured["agent"] = agent
+        captured["source"] = source
         return CampaignAnalysisResult(
             benchmark=benchmark,
             campaign_id=campaign_id,
@@ -332,6 +338,7 @@ def test_cli_analyze_all_phases_uses_campaign_analyzer(
         "benchmark": "gaia_level1",
         "campaign_id": "campaign_all",
         "agent": "codex_cli",
+        "source": "eval_preferred",
     }
     out = capsys.readouterr().out
     assert "Campaign analysis complete" in out

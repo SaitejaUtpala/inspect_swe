@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from inspect_ai import eval
@@ -13,6 +14,16 @@ from .artifacts import assert_canonical_eval_log_path, load_sidecar_records
 from .hooks import ReliabilityHookConfig, configure_reliability_hooks
 from .paths import campaign_sidecar_path
 from .telemetry import TelemetryCoverageReport, assess_sidecar_coverage
+
+
+@dataclass(frozen=True)
+class PhaseRepeatExecution:
+    """Runtime result for one agent/repeat execution."""
+
+    agent: str
+    repeat_id: int
+    logs: list[EvalLog]
+    coverage: TelemetryCoverageReport
 
 
 def default_campaign_id() -> str:
@@ -195,3 +206,60 @@ def combine_coverage_reports(
         duplicate_identity_keys=sorted(set(duplicates)),
         identity_warning_count=warnings,
     )
+
+
+def execute_phase_repeats(
+    *,
+    agents: list[str],
+    repeats: int,
+    verify_telemetry: bool,
+    fail_on_incomplete_telemetry: bool,
+    run_single_repeat: Callable[[str, int], list[EvalLog]],
+    assess_repeat_coverage: Callable[[list[EvalLog], str, int], TelemetryCoverageReport],
+    on_incomplete_telemetry: Callable[[str, int, TelemetryCoverageReport], Exception]
+    | None = None,
+) -> list[PhaseRepeatExecution]:
+    """Execute all agent/repeat runs with shared telemetry enforcement."""
+    executions: list[PhaseRepeatExecution] = []
+    for agent in agents:
+        for repeat_id in range(repeats):
+            logs = run_single_repeat(agent, repeat_id)
+            coverage = assess_repeat_coverage(logs, agent, repeat_id)
+            if verify_telemetry and fail_on_incomplete_telemetry and not coverage.complete:
+                if on_incomplete_telemetry is not None:
+                    raise on_incomplete_telemetry(agent, repeat_id, coverage)
+                raise RuntimeError(
+                    "incomplete reliability telemetry "
+                    f"(agent={agent}, repeat_id={repeat_id})"
+                )
+            executions.append(
+                PhaseRepeatExecution(
+                    agent=agent,
+                    repeat_id=repeat_id,
+                    logs=logs,
+                    coverage=coverage,
+                )
+            )
+    return executions
+
+
+def summarize_phase_executions(
+    executions: list[PhaseRepeatExecution],
+) -> list[dict[str, Any]]:
+    """Normalize repeat execution rows for phase result models."""
+    rows: list[dict[str, Any]] = []
+    for execution in executions:
+        coverage = execution.coverage
+        rows.append(
+            {
+                "agent": execution.agent,
+                "repeat_id": execution.repeat_id,
+                "run_ids": [log.eval.run_id for log in execution.logs],
+                "log_paths": [log.location for log in execution.logs if log.location],
+                "coverage_complete": coverage.complete,
+                "missing_sample_uuids": coverage.missing_sample_uuids,
+                "duplicate_identity_keys": coverage.duplicate_identity_keys,
+                "identity_warning_count": coverage.identity_warning_count,
+            }
+        )
+    return rows

@@ -122,6 +122,7 @@ class ReliabilityCampaignConfig(BaseModel):
     fail_fast: bool = True
     run_analysis: bool = True
     write_report: bool = True
+    analysis_source: Literal["eval_preferred", "sidecar_only"] = "eval_preferred"
 
     @field_validator("campaign_id")
     @classmethod
@@ -221,6 +222,7 @@ def run_reliability_campaign(
             log_root=config.log_root,
             benchmark=spec.benchmark,
             campaign_id=campaign_id,
+            source=config.analysis_source,
         )
         analysis_path = write_campaign_analysis_json(
             result=analysis,

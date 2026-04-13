@@ -31,6 +31,7 @@ from .orchestrator import (
     ReliabilityCampaignResult,
     run_reliability_campaign,
 )
+from .paths import campaign_sidecar_path
 from .perturbations import (
     FaultPerturbationSpec,
     PromptPerturbationSpec,
@@ -1030,6 +1031,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write markdown campaign report after analysis.",
     )
     campaign.add_argument(
+        "--analysis-source",
+        choices=("eval_preferred", "sidecar_only"),
+        default="eval_preferred",
+        help=(
+            "Campaign analysis source mode: prefer canonical eval logs first "
+            "or force sidecar-only analysis."
+        ),
+    )
+    campaign.add_argument(
         "--orchestrator-mode",
         choices=("single_process", "multi_process"),
         default="multi_process",
@@ -1251,6 +1261,15 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=False,
         help="Analyze campaign-wide metrics across baseline/fault/prompt/structural.",
+    )
+    analyze.add_argument(
+        "--analysis-source",
+        choices=("eval_preferred", "sidecar_only"),
+        default="eval_preferred",
+        help=(
+            "Analysis source mode for --all-phases: prefer canonical eval logs first "
+            "or force sidecar-only analysis."
+        ),
     )
     analyze.set_defaults(handler=_handle_analyze_command)
 
@@ -1677,6 +1696,7 @@ def _handle_campaign_command(args: argparse.Namespace) -> int:
         fail_fast=args.fail_fast,
         run_analysis=args.run_analysis,
         write_report=args.write_report,
+        analysis_source=args.analysis_source,
     )
     result = run_reliability_campaign(spec=spec, tasks=args.tasks, config=config)
     _print_campaign_result(result, json_output=args.json)
@@ -1714,6 +1734,7 @@ def _handle_analyze_command(args: argparse.Namespace) -> int:
             benchmark=args.benchmark,
             campaign_id=args.campaign_id,
             agent=args.agent,
+            source=args.analysis_source,
         )
         _print_campaign_analysis_result(result, json_output=args.json)
         return 0
@@ -1742,9 +1763,14 @@ def _resolve_analyze_sidecar_path(
             "--benchmark is required when --sidecar-path is not provided"
         )
     if campaign_id:
-        return (
-            f"{log_root}/{benchmark}/"
-            f"{benchmark}_baseline_{campaign_id}_records.jsonl"
+        return str(
+            campaign_sidecar_path(
+                log_root=log_root,
+                benchmark=benchmark,
+                phase="baseline",
+                campaign_id=campaign_id,
+                sidecar_filename="records.jsonl",
+            )
         )
     # Backward-compatible path for pre-campaign sidecars.
     return f"{log_root}/{sidecar_dir}/{benchmark}/baseline_records.jsonl"
@@ -1800,12 +1826,30 @@ def _print_campaign_analysis_result(
         "Campaign analysis complete: "
         f"benchmark={result.benchmark} campaign_id={result.campaign_id}"
     )
+    print(
+        "Campaign resources: "
+        f"started_at={result.resources.started_at or 'n/a'} "
+        f"completed_at={result.resources.completed_at or 'n/a'} "
+        f"wall_time={_fmt_duration(result.resources.wall_time_sec)} "
+        f"working_time={_fmt_duration(result.resources.working_time_sec)} "
+        f"cost={_fmt_metric(result.resources.total_cost_usd)} "
+        f"tokens={result.resources.total_tokens if result.resources.total_tokens is not None else 'n/a'}"
+    )
     print("Phase accuracies:")
     for phase in ("baseline", "fault", "prompt", "structural"):
         summary = result.phase_summaries.get(phase)
         accuracy = _fmt_metric(summary.accuracy if summary else None)
         records = summary.total_records if summary else 0
-        print(f"- {phase}: accuracy={accuracy} records={records}")
+        source = summary.source if summary else "n/a"
+        started_at = summary.started_at if summary else None
+        completed_at = summary.completed_at if summary else None
+        cost = summary.total_cost_usd if summary else None
+        print(
+            f"- {phase}: accuracy={accuracy} records={records} source={source} "
+            f"started_at={started_at or 'n/a'} completed_at={completed_at or 'n/a'} "
+            f"wall_time={_fmt_duration(summary.wall_time_sec if summary else None)} "
+            f"cost={_fmt_metric(cost)}"
+        )
 
     print(
         "Predictability: "
@@ -1845,6 +1889,15 @@ def _fmt_metric(value: float | None) -> str:
     if value is None:
         return "n/a"
     return f"{value:.3f}"
+
+
+def _fmt_duration(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    total_seconds = int(round(value))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 def _parse_key_value_pairs(values: list[str]) -> dict[str, Any]:

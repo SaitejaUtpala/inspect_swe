@@ -14,7 +14,6 @@ from inspect_ai.hooks import (
     TaskStart,
     hooks,
 )
-from inspect_ai.hooks._hooks import get_all_hooks
 from pydantic import BaseModel
 
 from .artifacts import ReliabilityRecord, SidecarWriter
@@ -65,16 +64,10 @@ def _active_config() -> ReliabilityHookConfig | None:
 
 
 def assert_reliability_hooks_active(require_enabled: bool = True) -> None:
-    """Fail-fast check for hook registration + activation."""
-    reliability_hooks = [hook for hook in get_all_hooks() if isinstance(hook, ReliabilityHooks)]
-    if not reliability_hooks:
+    """Fail-fast check for hook runtime configuration."""
+    if require_enabled and (_active_config() is None or not ReliabilityHooks().enabled()):
         raise RuntimeError(
-            "ReliabilityHooks is not registered. Ensure inspect_swe reliability "
-            "hooks are imported via package entrypoint before running reliability jobs."
-        )
-    if require_enabled and not any(hook.enabled() for hook in reliability_hooks):
-        raise RuntimeError(
-            "ReliabilityHooks is registered but disabled. Configure hook runtime "
+            "ReliabilityHooks is disabled. Configure hook runtime "
             "state before starting reliability execution."
         )
 
@@ -168,10 +161,10 @@ class ReliabilityHooks(Hooks):
             outcome=self._outcome_payload(data.sample.scores or {}),
             behavior=self._behavior_payload(data.sample.events),
             resources=self._resource_payload(data.sample.total_time, data.sample.working_time),
-            confidence=self._confidence_payload(metadata),
+            confidence=self._confidence_payload(metadata, data.sample.scores or {}),
             perturbation=self._select_prefixed(metadata, "reliability_perturbation_"),
-            safety=self._select_prefixed(metadata, "reliability_safety_"),
-            abstention=self._select_prefixed(metadata, "reliability_abstention_"),
+            safety=self._safety_payload(metadata, data.sample.scores or {}),
+            abstention=self._abstention_payload(metadata, data.sample.scores or {}),
             metadata=metadata,
         )
         writer.write(record)
@@ -238,11 +231,61 @@ class ReliabilityHooks(Hooks):
             "working_time": working_time,
         }
 
-    def _confidence_payload(self, metadata: dict[str, Any]) -> dict[str, Any]:
+    def _confidence_payload(
+        self, metadata: dict[str, Any], scores: dict[str, Any]
+    ) -> dict[str, Any]:
+        score_payload = self._score_signal_payload(scores, "reliability_confidence_signal")
+        if score_payload:
+            confidence = score_payload.get("confidence")
+            if confidence is None:
+                confidence = score_payload.get("value")
+            return {
+                "value": confidence,
+                "source_key": "scorer:reliability_confidence_signal",
+            }
         for key in ("reliability_confidence", "confidence", "self_confidence"):
             if key in metadata:
                 return {"value": metadata[key], "source_key": key}
         return {}
+
+    def _safety_payload(self, metadata: dict[str, Any], scores: dict[str, Any]) -> dict[str, Any]:
+        score_payload = self._score_signal_payload(scores, "reliability_safety_violation")
+        if score_payload:
+            violation = score_payload.get("violation")
+            if violation is None:
+                violation = score_payload.get("value")
+            return {
+                "violation": bool(violation),
+                "source_key": "scorer:reliability_safety_violation",
+            }
+        return self._select_prefixed(metadata, "reliability_safety_")
+
+    def _abstention_payload(
+        self, metadata: dict[str, Any], scores: dict[str, Any]
+    ) -> dict[str, Any]:
+        score_payload = self._score_signal_payload(scores, "reliability_abstention_signal")
+        if score_payload:
+            abstained = score_payload.get("abstained")
+            if abstained is None:
+                abstained = score_payload.get("value")
+            return {
+                "abstained": bool(abstained),
+                "source_key": "scorer:reliability_abstention_signal",
+            }
+        return self._select_prefixed(metadata, "reliability_abstention_")
+
+    def _score_signal_payload(
+        self, scores: dict[str, Any], scorer_name: str
+    ) -> dict[str, Any]:
+        scorer = scores.get(scorer_name)
+        if scorer is None:
+            return {}
+        value = getattr(scorer, "value", None)
+        metadata = getattr(scorer, "metadata", None) or {}
+        payload = dict(metadata)
+        if "value" not in payload:
+            payload["value"] = value
+        return payload
 
     def _select_prefixed(
         self, metadata: dict[str, Any], prefix: str

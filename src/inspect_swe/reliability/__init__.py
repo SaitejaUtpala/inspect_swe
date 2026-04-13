@@ -8,6 +8,7 @@ from .analysis import (
     AbstentionMetrics,
     BaselineAnalysisResult,
     CampaignAnalysisResult,
+    CampaignResourceSummary,
     ConsistencyMetrics,
     PhaseAnalysisSummary,
     PredictabilityMetrics,
@@ -66,6 +67,20 @@ from .prompt import (
     PromptRepeatResult,
     run_prompt_phase,
 )
+from .reducers import (
+    brier_predictability_reducer,
+    confidence_stability_reducer,
+    outcome_consistency_reducer,
+)
+from .scorers import (
+    reliability_abstention_signal,
+    reliability_confidence_signal,
+    reliability_safety_violation,
+)
+from .solver_signals import (
+    reliability_instrumented_solver,
+    reliability_signal_collector,
+)
 from .spec import PhaseName, ReliabilitySpec
 from .structural import (
     StructuralExecutionError,
@@ -79,6 +94,7 @@ from .telemetry import TelemetryCoverageReport, assess_sidecar_coverage
 __all__ = [
     "BaselineAnalysisResult",
     "CampaignAnalysisResult",
+    "CampaignResourceSummary",
     "PredictabilityMetrics",
     "RobustnessMetrics",
     "SafetyMetrics",
@@ -128,6 +144,14 @@ __all__ = [
     "run_prompt_phase",
     "run_reliability_campaign",
     "run_structural_phase",
+    "reliability_confidence_signal",
+    "reliability_safety_violation",
+    "reliability_abstention_signal",
+    "reliability_signal_collector",
+    "reliability_instrumented_solver",
+    "outcome_consistency_reducer",
+    "confidence_stability_reducer",
+    "brier_predictability_reducer",
     "assert_reliability_hooks_active",
     "configure_reliability_hooks",
     "disable_reliability_hooks",
