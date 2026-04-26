@@ -7,6 +7,7 @@ import json
 import sys
 from typing import Any, Callable, Sequence, cast
 
+from .analyze import PhaseAnalyzeResult, analyze_phase
 from .baseline import (
     BaselineExecutionError,
     BaselinePhaseConfig,
@@ -348,6 +349,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     campaign.set_defaults(handler=_handle_campaign_command)
 
+    analyze = subparsers.add_parser(
+        "analyze",
+        help="Analyze one reliability phase from eval logs.",
+        description=(
+            "Analyze one phase and write phase metrics to a `.log` file. "
+            "Only baseline metrics are implemented in this branch."
+        ),
+    )
+    analyze.add_argument("--benchmark", required=True, help="Benchmark label.")
+    analyze.add_argument("--campaign-id", required=True, help="Campaign identifier.")
+    analyze.add_argument(
+        "--phase",
+        choices=ALL_PHASES,
+        required=True,
+        help="Phase to analyze.",
+    )
+    analyze.add_argument(
+        "--log-root",
+        default="logs/reliability",
+        help="Root directory for reliability logs.",
+    )
+    analyze.add_argument(
+        "--agent",
+        default=None,
+        help="Optional agent name override for baseline extraction.",
+    )
+    analyze.add_argument(
+        "--json",
+        action="store_true",
+        help="Print structured JSON output.",
+    )
+    analyze.set_defaults(handler=_handle_analyze_command)
+
     return parser
 
 
@@ -426,6 +460,20 @@ def _run_baseline(args: argparse.Namespace, *, phases: list[str]) -> int:
     return 0
 
 
+def _handle_analyze_command(args: argparse.Namespace) -> int:
+    result = analyze_phase(
+        benchmark=args.benchmark,
+        campaign_id=args.campaign_id,
+        phase=cast(Any, args.phase),
+        log_root=args.log_root,
+        agent=args.agent,
+    )
+    _print_analyze_result(result, json_output=args.json)
+    if result.status != "ok":
+        return 2
+    return 0
+
+
 def _print_baseline_result(result: BaselinePhaseResult, *, json_output: bool) -> None:
     if json_output:
         print(json.dumps(result.model_dump(), indent=2))
@@ -444,6 +492,26 @@ def _print_baseline_result(result: BaselinePhaseResult, *, json_output: bool) ->
             f"missing={len(row.missing_sample_uuids)} "
             f"duplicates={len(row.duplicate_identity_keys)}"
         )
+
+
+def _print_analyze_result(result: PhaseAnalyzeResult, *, json_output: bool) -> None:
+    if json_output:
+        print(json.dumps(result.model_dump(), indent=2))
+        return
+    if result.status != "ok":
+        print(
+            f"phase {result.phase} not implemented yet. "
+            f"Analysis log written to {result.output_log_path}",
+            file=sys.stderr,
+        )
+        return
+    print(
+        f"Phase analysis complete: benchmark={result.benchmark} "
+        f"campaign_id={result.campaign_id} phase={result.phase}"
+    )
+    print(f"Analysis log: {result.output_log_path}")
+    for key, value in result.metrics.items():
+        print(f"- {key}={value}")
 
 
 def _parse_key_value_pairs(values: list[str]) -> dict[str, Any]:

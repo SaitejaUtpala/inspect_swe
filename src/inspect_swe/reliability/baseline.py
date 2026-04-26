@@ -34,10 +34,6 @@ def assert_canonical_eval_log_path(path: str | Path) -> None:
 
 def preflight_reliability_spec(spec: ReliabilitySpec) -> None:
     """Fail-fast validation for reliability runs."""
-    if spec.canonical_log_format != "eval":
-        raise ValueError(
-            "Only Inspect `.eval` canonical logs are supported for reliability execution."
-        )
     validate_orchestrator_policy(spec.concurrency)
 
 

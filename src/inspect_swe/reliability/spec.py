@@ -38,7 +38,6 @@ class ReliabilitySpec(BaseModel):
         ]
     )
     seed: int = 0
-    canonical_log_format: Literal["eval"] = "eval"
     strict_identity_tags: bool = True
     concurrency: OrchestratorConcurrency = Field(
         default_factory=OrchestratorConcurrency

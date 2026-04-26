@@ -10,6 +10,7 @@ from .baseline import (
     BaselineRepeatResult,
     run_baseline_phase,
 )
+from .analyze import PhaseAnalyzeResult, analyze_phase
 from .concurrency import (
     ConcurrencyPolicyError,
     OrchestratorConcurrency,
@@ -21,6 +22,7 @@ from .telemetry import TelemetryCoverageReport, assess_eval_coverage
 
 __all__ = [
     "BaselineExecutionError",
+    "PhaseAnalyzeResult",
     "BaselinePhaseConfig",
     "BaselinePhaseResult",
     "BaselineRepeatResult",
@@ -30,6 +32,7 @@ __all__ = [
     "BaselineSampleView",
     "ReliabilitySpec",
     "TelemetryCoverageReport",
+    "analyze_phase",
     "assess_eval_coverage",
     "extract_baseline_sample_views",
     "run_baseline_phase",
