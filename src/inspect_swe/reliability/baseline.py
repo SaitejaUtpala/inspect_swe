@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -297,8 +295,6 @@ async def _compute_confidence_with_same_model(state: TaskState) -> float | None:
     )
     confidence_messages = messages + [prompt]
 
-    _log_confidence_prompt_messages(confidence_messages)
-
     model = get_model()
     confidence_output = await model.generate(confidence_messages)
     value = _parse_confidence_value(getattr(confidence_output, "completion", None))
@@ -319,40 +315,6 @@ def _parse_confidence_value(value: Any) -> float | None:
     if parsed < 0 or parsed > 100:
         return None
     return round(parsed, 4)
-
-
-def _log_confidence_prompt_messages(messages: list[Any]) -> None:
-    payload = [_message_for_log(message) for message in messages]
-    raw = json.dumps(payload, sort_keys=True, ensure_ascii=True)
-    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-    log_path = Path.cwd() / f"src_inspect_swe_{digest}.log"
-    log_path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
-
-
-def _message_for_log(message: Any) -> dict[str, Any]:
-    role = getattr(message, "role", None)
-    content = getattr(message, "content", None)
-    return {
-        "role": role if isinstance(role, str) else str(role),
-        "content": _content_for_log(content),
-    }
-
-
-def _content_for_log(content: Any) -> Any:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[Any] = []
-        for item in content:
-            text = getattr(item, "text", None)
-            if isinstance(text, str):
-                parts.append({"text": text})
-            elif isinstance(item, dict):
-                parts.append(item)
-            else:
-                parts.append(str(item))
-        return parts
-    return content if isinstance(content, (dict, int, float, bool)) else str(content)
 
 
 def _default_campaign_id() -> str:
