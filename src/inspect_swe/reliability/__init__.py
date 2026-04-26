@@ -18,7 +18,6 @@ from .concurrency import (
 )
 from .eval_view import BaselineSampleView, extract_baseline_sample_views
 from .spec import PhaseName, ReliabilitySpec
-from .telemetry import TelemetryCoverageReport, assess_eval_coverage
 
 __all__ = [
     "BaselineExecutionError",
@@ -31,9 +30,7 @@ __all__ = [
     "PhaseName",
     "BaselineSampleView",
     "ReliabilitySpec",
-    "TelemetryCoverageReport",
     "analyze_phase",
-    "assess_eval_coverage",
     "extract_baseline_sample_views",
     "run_baseline_phase",
     "validate_orchestrator_policy",

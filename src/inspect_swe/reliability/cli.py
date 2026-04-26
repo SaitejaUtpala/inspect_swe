@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run baseline reliability phase.",
         description=(
             "Run K independent baseline repeats with `.eval` logs as the only "
-            "reliability telemetry source."
+            "reliability source of truth."
         ),
     )
     baseline.add_argument("--benchmark", required=True, help="Benchmark label.")
@@ -126,18 +126,6 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Require reliability identity metadata tags.",
-    )
-    baseline.add_argument(
-        "--verify-telemetry",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Validate eval-native telemetry coverage.",
-    )
-    baseline.add_argument(
-        "--fail-on-incomplete-telemetry",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Fail run when telemetry coverage is incomplete.",
     )
     baseline.add_argument(
         "--orchestrator-mode",
@@ -289,18 +277,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Require reliability identity metadata tags.",
     )
     campaign.add_argument(
-        "--verify-telemetry",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Validate eval-native telemetry coverage.",
-    )
-    campaign.add_argument(
-        "--fail-on-incomplete-telemetry",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Fail run when telemetry coverage is incomplete.",
-    )
-    campaign.add_argument(
         "--orchestrator-mode",
         choices=("single_process", "multi_process"),
         default="multi_process",
@@ -447,8 +423,6 @@ def _run_baseline(args: argparse.Namespace, *, phases: list[str]) -> int:
         sandbox=args.sandbox,
         limit=_parse_limit_arg(args.limit),
         sample_id=_parse_sample_id_arg(args.sample_id),
-        verify_telemetry=args.verify_telemetry,
-        fail_on_incomplete_telemetry=args.fail_on_incomplete_telemetry,
     )
 
     result = run_baseline_phase(
@@ -485,12 +459,9 @@ def _print_baseline_result(result: BaselinePhaseResult, *, json_output: bool) ->
         f"campaign_id={result.campaign_id}"
     )
     for row in result.results:
-        status = "complete" if row.coverage_complete else "incomplete"
         print(
             f"- agent={row.agent} repeat={row.repeat_id} "
-            f"coverage={status} logs={len(row.log_paths)} "
-            f"missing={len(row.missing_sample_uuids)} "
-            f"duplicates={len(row.duplicate_identity_keys)}"
+            f"logs={len(row.log_paths)}"
         )
 
 

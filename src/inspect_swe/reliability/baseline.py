@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from .concurrency import validate_orchestrator_policy
 from .spec import ReliabilitySpec
-from .telemetry import TelemetryCoverageReport, assess_eval_coverage
 
 
 class BaselineExecutionError(RuntimeError):
@@ -52,8 +51,6 @@ class BaselinePhaseConfig(BaseModel):
     limit: int | tuple[int, int] | None = None
     sample_id: str | int | list[str] | list[int] | list[str | int] | None = None
     compute_confidence: bool = True
-    verify_telemetry: bool = True
-    fail_on_incomplete_telemetry: bool = True
 
     @field_validator("campaign_id")
     @classmethod
@@ -73,10 +70,6 @@ class BaselineRepeatResult(BaseModel):
     repeat_id: int
     run_ids: list[str]
     log_paths: list[str]
-    coverage_complete: bool
-    missing_sample_uuids: list[str]
-    duplicate_identity_keys: list[str]
-    identity_warning_count: int
 
 
 class BaselinePhaseResult(BaseModel):
@@ -116,36 +109,12 @@ def run_baseline_phase(
                 repeat_id=repeat_id,
             )
 
-            coverage = _assess_repeat_coverage(
-                logs=logs,
-                agent=agent,
-                repeat_id=repeat_id,
-                phase="baseline",
-                strict_identity_tags=spec.strict_identity_tags,
-            )
-
-            if (
-                config.verify_telemetry
-                and config.fail_on_incomplete_telemetry
-                and not coverage.complete
-            ):
-                raise BaselineExecutionError(
-                    "Incomplete reliability telemetry detected for baseline repeat "
-                    f"(agent={agent}, repeat_id={repeat_id}): "
-                    f"missing_sample_uuids={coverage.missing_sample_uuids}, "
-                    f"duplicate_identity_keys={coverage.duplicate_identity_keys}"
-                )
-
             repeat_results.append(
                 BaselineRepeatResult(
                     agent=agent,
                     repeat_id=repeat_id,
                     run_ids=[log.eval.run_id for log in logs],
                     log_paths=[log.location for log in logs if log.location],
-                    coverage_complete=coverage.complete,
-                    missing_sample_uuids=coverage.missing_sample_uuids,
-                    duplicate_identity_keys=coverage.duplicate_identity_keys,
-                    identity_warning_count=coverage.identity_warning_count,
                 )
             )
 
@@ -317,49 +286,3 @@ def _default_campaign_id() -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     suffix = uuid4().hex[:8]
     return f"{timestamp}_{suffix}"
-
-
-def _assess_repeat_coverage(
-    *,
-    logs: list[EvalLog],
-    agent: str,
-    repeat_id: int,
-    phase: str,
-    strict_identity_tags: bool,
-) -> TelemetryCoverageReport:
-    reports: list[TelemetryCoverageReport] = []
-    for log in logs:
-        reports.append(
-            assess_eval_coverage(
-                log,
-                expected_phase=phase,
-                expected_agent=agent,
-                expected_repeat_id=repeat_id,
-                strict_identity_tags=strict_identity_tags,
-            )
-        )
-
-    return _combine_coverage_reports(reports)
-
-
-def _combine_coverage_reports(
-    reports: list[TelemetryCoverageReport],
-) -> TelemetryCoverageReport:
-    missing: list[str] = []
-    duplicates: list[str] = []
-    expected = 0
-    observed = 0
-    warnings = 0
-    for report in reports:
-        expected += report.expected_samples
-        observed += report.observed_records
-        missing.extend(report.missing_sample_uuids)
-        duplicates.extend(report.duplicate_identity_keys)
-        warnings += report.identity_warning_count
-    return TelemetryCoverageReport(
-        expected_samples=expected,
-        observed_records=observed,
-        missing_sample_uuids=sorted(set(missing)),
-        duplicate_identity_keys=sorted(set(duplicates)),
-        identity_warning_count=warnings,
-    )

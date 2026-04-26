@@ -18,7 +18,6 @@ from .reliability import (
     BaselineSampleView,
     OrchestratorConcurrency,
     ReliabilitySpec,
-    assess_eval_coverage,
     extract_baseline_sample_views,
     run_baseline_phase,
 )
@@ -54,7 +53,6 @@ __all__ = [
     "BaselineExecutionError",
     "OrchestratorConcurrency",
     "extract_baseline_sample_views",
-    "assess_eval_coverage",
     "run_baseline_phase",
     "__version__",
     "download_wheels_tarball",
