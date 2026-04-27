@@ -14,9 +14,10 @@ def compute_baseline_metrics(
     """Compute baseline metrics using hal-harness field names."""
     success_values = [_binary_success(view.scores) for view in views]
     successes = [value for value in success_values if value is not None]
-    confidences = [
+    confidences_percent = [
         view.confidence_value for view in views if view.confidence_value is not None
     ]
+    confidences = [value / 100.0 for value in confidences_percent]
 
     by_sample_success: dict[str, list[float]] = {}
     by_sample_confidence: dict[str, list[float]] = {}
@@ -83,11 +84,23 @@ def compute_baseline_metrics(
         ]
     )
 
-    predictability_calibration = _predictability_calibration(confidences, successes)
-    predictability_roc_auc = _predictability_roc_auc(confidences, successes)
-    predictability_brier_score = _predictability_brier_score(confidences, successes)
+    paired_confidences: list[float] = []
+    paired_successes: list[float] = []
+    for view, success in zip(views, success_values):
+        if success is None or view.confidence_value is None:
+            continue
+        paired_confidences.append(view.confidence_value / 100.0)
+        paired_successes.append(success)
+
+    predictability_calibration = _predictability_calibration(
+        paired_confidences, paired_successes
+    )
+    predictability_roc_auc = _predictability_roc_auc(paired_confidences, paired_successes)
+    predictability_brier_score = _predictability_brier_score(
+        paired_confidences, paired_successes
+    )
     predictability_rate_confidence_correlation = _predictability_rate_confidence_correlation(
-        confidences, successes
+        paired_confidences, paired_successes
     )
 
     agent_name = (
@@ -145,11 +158,35 @@ def compute_baseline_metrics(
 
 
 def _binary_success(scores: dict[str, Any]) -> float | None:
+    for key in ("reward", "accuracy", "score", "correct", "passed", "pass"):
+        if key in scores:
+            parsed = _parse_binary(scores[key])
+            if parsed is not None:
+                return parsed
+
     for value in scores.values():
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, (int, float)):
-            return 1.0 if float(value) == 1.0 else 0.0
+        parsed = _parse_binary(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _parse_binary(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, (int, float)):
+        return 1.0 if float(value) >= 0.5 else 0.0
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in {"c", "correct", "pass", "passed", "true", "1", "yes", "success"}:
+            return 1.0
+        if token in {"i", "incorrect", "fail", "failed", "false", "0", "no", "error"}:
+            return 0.0
+        return None
+    if isinstance(value, dict):
+        for key in ("value", "score", "reward", "correct", "passed", "pass"):
+            if key in value:
+                return _parse_binary(value[key])
     return None
 
 
