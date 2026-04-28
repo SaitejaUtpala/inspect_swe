@@ -11,10 +11,10 @@ from .acp._agents.claude_code import interactive_claude_code
 from .acp._agents.codex_cli import interactive_codex_cli
 from .acp._agents.gemini_cli import interactive_gemini_cli
 from .reliability import (
+    BaselineAgentResult,
     BaselineExecutionError,
     BaselinePhaseConfig,
     BaselinePhaseResult,
-    BaselineRepeatResult,
     BaselineSampleView,
     OrchestratorConcurrency,
     ReliabilitySpec,
@@ -48,7 +48,7 @@ __all__ = [
     "ReliabilitySpec",
     "BaselineSampleView",
     "BaselinePhaseConfig",
-    "BaselineRepeatResult",
+    "BaselineAgentResult",
     "BaselinePhaseResult",
     "BaselineExecutionError",
     "OrchestratorConcurrency",

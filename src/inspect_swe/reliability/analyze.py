@@ -80,13 +80,11 @@ def _load_baseline_views(
     for eval_path in eval_paths:
         eval_log = read_eval_log(str(eval_path), header_only=False)
         run_metadata = dict(getattr(eval_log.eval, "metadata", {}) or {})
-        run_repeat_id = _to_int(run_metadata.get("reliability_repeat_id"), 0)
         run_agent = agent or _to_text(run_metadata.get("reliability_agent")) or "unknown_agent"
         run_views, _ = extract_baseline_sample_views(
             eval_log,
             expected_phase="baseline",
             expected_agent=run_agent,
-            expected_repeat_id=run_repeat_id,
             strict_identity_tags=True,
         )
         views.extend(run_views)
@@ -109,14 +107,6 @@ def _write_analysis_log(result: PhaseAnalyzeResult) -> None:
         "metrics": result.metrics,
     }
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=True), encoding="utf-8")
-
-
-def _to_int(value: Any, default: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        return default
-    return parsed
 
 
 def _to_text(value: Any) -> str | None:

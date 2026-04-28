@@ -39,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
         "baseline",
         help="Run baseline reliability phase.",
         description=(
-            "Run K independent baseline repeats with `.eval` logs as the only "
+            "Run baseline epochs with `.eval` logs as the only "
             "reliability source of truth."
         ),
     )
@@ -57,10 +57,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Agent identifier (repeat for multi-agent runs).",
     )
     baseline.add_argument(
-        "--repeats",
+        "--epochs",
         type=int,
         default=5,
-        help="Independent baseline repeats per agent (default: 5).",
+        help="Inspect epochs per sample (default: 5).",
+    )
+    baseline.add_argument(
+        "--epoch-reducer",
+        dest="epoch_reducers",
+        action="append",
+        default=None,
+        help="Inspect epoch score reducer (repeat for multiple reducers).",
     )
     baseline.add_argument(
         "--seed",
@@ -206,10 +213,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reliability phase (repeatable).",
     )
     campaign.add_argument(
-        "--repeats",
+        "--epochs",
         type=int,
         default=5,
-        help="Independent baseline repeats per agent (default: 5).",
+        help="Inspect epochs per sample (default: 5).",
+    )
+    campaign.add_argument(
+        "--epoch-reducer",
+        dest="epoch_reducers",
+        action="append",
+        default=None,
+        help="Inspect epoch score reducer (repeat for multiple reducers).",
     )
     campaign.add_argument(
         "--seed",
@@ -413,7 +427,8 @@ def _run_baseline(args: argparse.Namespace, *, phases: list[str]) -> int:
     )
 
     config = BaselinePhaseConfig(
-        repeats=args.repeats,
+        epochs=args.epochs,
+        epoch_reducers=args.epoch_reducers,
         campaign_id=args.campaign_id,
         log_root=args.log_root,
         model=args.model,
@@ -455,13 +470,12 @@ def _print_baseline_result(result: BaselinePhaseResult, *, json_output: bool) ->
 
     print(
         "Baseline reliability run complete: "
-        f"benchmark={result.benchmark} repeats={result.repeats} "
+        f"benchmark={result.benchmark} epochs={result.epochs} "
         f"campaign_id={result.campaign_id}"
     )
     for row in result.results:
         print(
-            f"- agent={row.agent} repeat={row.repeat_id} "
-            f"logs={len(row.log_paths)}"
+            f"- agent={row.agent} logs={len(row.log_paths)}"
         )
 
 

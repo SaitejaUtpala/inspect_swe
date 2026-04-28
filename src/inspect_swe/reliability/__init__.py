@@ -4,10 +4,10 @@ This package treats Inspect `.eval` logs as canonical run records.
 """
 
 from .baseline import (
+    BaselineAgentResult,
     BaselineExecutionError,
     BaselinePhaseConfig,
     BaselinePhaseResult,
-    BaselineRepeatResult,
     run_baseline_phase,
 )
 from .analyze import PhaseAnalyzeResult, analyze_phase
@@ -22,9 +22,9 @@ from .spec import PhaseName, ReliabilitySpec
 __all__ = [
     "BaselineExecutionError",
     "PhaseAnalyzeResult",
+    "BaselineAgentResult",
     "BaselinePhaseConfig",
     "BaselinePhaseResult",
-    "BaselineRepeatResult",
     "ConcurrencyPolicyError",
     "OrchestratorConcurrency",
     "PhaseName",

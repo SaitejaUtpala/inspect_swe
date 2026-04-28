@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from inspect_ai import Epochs, eval
 from inspect_ai.agent import as_solver, is_agent
-from inspect_ai import eval
 from inspect_ai.log import EvalLog
 from inspect_ai.model import ChatMessageUser, get_model
+from inspect_ai.scorer import Score
 from inspect_ai.solver import Generate, Solver, TaskState, solver
 from pydantic import BaseModel, Field, field_validator
 
@@ -39,7 +40,8 @@ def preflight_reliability_spec(spec: ReliabilitySpec) -> None:
 class BaselinePhaseConfig(BaseModel):
     """Options for baseline phase execution."""
 
-    repeats: int = Field(default=5, ge=1)
+    epochs: int = Field(default=5, ge=1)
+    epoch_reducers: str | list[str] | None = None
     campaign_id: str | None = None
     log_root: str = "logs/reliability"
     model: str | None = None
@@ -63,11 +65,10 @@ class BaselinePhaseConfig(BaseModel):
         return cleaned
 
 
-class BaselineRepeatResult(BaseModel):
-    """One baseline repeat execution summary."""
+class BaselineAgentResult(BaseModel):
+    """One baseline agent execution summary."""
 
     agent: str
-    repeat_id: int
     run_ids: list[str]
     log_paths: list[str]
 
@@ -76,9 +77,9 @@ class BaselinePhaseResult(BaseModel):
     """Complete baseline phase execution summary."""
 
     benchmark: str
-    repeats: int
+    epochs: int
     campaign_id: str
-    results: list[BaselineRepeatResult]
+    results: list[BaselineAgentResult]
 
 
 def run_baseline_phase(
@@ -87,7 +88,7 @@ def run_baseline_phase(
     tasks: Any,
     config: BaselinePhaseConfig | None = None,
 ) -> BaselinePhaseResult:
-    """Run K independent baseline repeats for all agents in the spec."""
+    """Run baseline with Inspect epochs for all agents in the spec."""
     config = config or BaselinePhaseConfig()
     if "baseline" not in spec.phases:
         raise BaselineExecutionError(
@@ -97,51 +98,45 @@ def run_baseline_phase(
     campaign_id = config.campaign_id or _default_campaign_id()
     preflight_reliability_spec(spec)
 
-    repeat_results: list[BaselineRepeatResult] = []
+    agent_results: list[BaselineAgentResult] = []
     for agent in spec.agents:
-        for repeat_id in range(config.repeats):
-            logs = _run_single_repeat(
-                spec=spec,
-                tasks=tasks,
-                config=config,
-                campaign_id=campaign_id,
+        logs = _run_agent_epochs(
+            spec=spec,
+            tasks=tasks,
+            config=config,
+            campaign_id=campaign_id,
+            agent=agent,
+        )
+        agent_results.append(
+            BaselineAgentResult(
                 agent=agent,
-                repeat_id=repeat_id,
+                run_ids=[log.eval.run_id for log in logs],
+                log_paths=[log.location for log in logs if log.location],
             )
-
-            repeat_results.append(
-                BaselineRepeatResult(
-                    agent=agent,
-                    repeat_id=repeat_id,
-                    run_ids=[log.eval.run_id for log in logs],
-                    log_paths=[log.location for log in logs if log.location],
-                )
-            )
+        )
 
     return BaselinePhaseResult(
         benchmark=spec.benchmark,
-        repeats=config.repeats,
+        epochs=config.epochs,
         campaign_id=campaign_id,
-        results=repeat_results,
+        results=agent_results,
     )
 
 
-def _run_single_repeat(
+def _run_agent_epochs(
     *,
     spec: ReliabilitySpec,
     tasks: Any,
     config: BaselinePhaseConfig,
     campaign_id: str,
     agent: str,
-    repeat_id: int,
 ) -> list[EvalLog]:
-    repeat_log_dir = (
+    agent_log_dir = (
         Path(config.log_root)
         / spec.benchmark
         / "baseline"
         / campaign_id
         / agent
-        / f"rep_{repeat_id:03d}"
     )
 
     run_task_args = dict(config.task_args)
@@ -153,7 +148,6 @@ def _run_single_repeat(
         {
             "reliability_phase": "baseline",
             "reliability_campaign_id": campaign_id,
-            "reliability_repeat_id": repeat_id,
             "reliability_agent_attempt_id": 0,
             "reliability_agent": agent,
             "reliability_benchmark": spec.benchmark,
@@ -164,9 +158,10 @@ def _run_single_repeat(
     eval_kwargs: dict[str, Any] = {
         "tasks": tasks,
         "metadata": run_metadata,
-        "log_dir": str(repeat_log_dir),
+        "log_dir": str(agent_log_dir),
         "log_format": "eval",
         "score": True,
+        "epochs": Epochs(config.epochs, config.epoch_reducers),
         "sample_shuffle": False,
         "max_tasks": spec.concurrency.max_tasks,
         "max_samples": spec.concurrency.max_samples,
@@ -233,10 +228,13 @@ def _wrap_solver_with_confidence(base_solver: Any | None) -> Solver | Any | None
             state = await wrapped(state, generate)
             confidence = await _compute_confidence_with_same_model(state)
             if confidence is not None:
-                metadata = dict(getattr(state, "metadata", {}) or {})
-                metadata["reliability_confidence"] = confidence
-                metadata["reliability_confidence_source"] = "same_model_followup"
-                state.metadata = metadata
+                if state.scores is None:
+                    state.scores = {}
+                state.scores["reliability_confidence"] = Score(
+                    value=confidence / 100.0,
+                    answer=str(confidence),
+                    metadata={"source": "same_model_followup"},
+                )
             return state
 
         return solve

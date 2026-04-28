@@ -26,6 +26,7 @@ def compute_baseline_metrics(
 
     agent_names = sorted({view.agent for view in views if view.agent})
     unique_sample_ids = sorted({str(view.sample_id) for view in views})
+    unique_epochs = sorted({view.epoch for view in views})
 
     for view, success in zip(views, success_values):
         sample_key = str(view.sample_id)
@@ -112,7 +113,7 @@ def compute_baseline_metrics(
     return {
         "agent": agent_name,
         "num_tasks": len(unique_sample_ids),
-        "num_runs": len(eval_paths),
+        "num_runs": len(unique_epochs),
         "accuracy": accuracy,
         "consistency_outcome": consistency_outcome,
         "consistency_trajectory_distribution": None,
