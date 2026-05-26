@@ -15,6 +15,8 @@ from .baseline import (
     run_baseline_phase,
 )
 from .concurrency import OrchestratorConcurrency
+from .fault import FaultPhaseResult, run_fault_phase
+from .faults import FaultPhaseConfig, FaultSpec
 from .spec import ReliabilitySpec
 
 ALL_PHASES = (
@@ -319,6 +321,49 @@ def build_parser() -> argparse.ArgumentParser:
         help="Inspect max_connections setting.",
     )
     campaign.add_argument(
+        "--fault-surface",
+        choices=("model", "message", "tool"),
+        default="model",
+        help="Fault injection surface for fault phase.",
+    )
+    campaign.add_argument(
+        "--fault-mode",
+        default="api_error",
+        help="Fault mode, e.g. api_error, rate_limit, truncate, corrupt, append_instruction, tool_error.",
+    )
+    campaign.add_argument(
+        "--fault-probability",
+        type=float,
+        default=0.2,
+        help="Probability of applying each eligible fault.",
+    )
+    campaign.add_argument(
+        "--fault-severity",
+        type=float,
+        default=1.0,
+        help="Fault severity in [0, 1].",
+    )
+    campaign.add_argument(
+        "--fault-delay-seconds",
+        type=float,
+        default=0.0,
+        help="Delay to apply for delay faults.",
+    )
+    campaign.add_argument(
+        "--fault-target",
+        default=None,
+        help="Optional target substring for tool/model fault matching.",
+    )
+    campaign.add_argument(
+        "--replace-native-web-search",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "For codex_cli fault runs, disable native web_search and bridge an "
+            "Inspect-owned reliability search tool instead."
+        ),
+    )
+    campaign.add_argument(
         "--json",
         action="store_true",
         help="Print structured JSON output.",
@@ -382,16 +427,23 @@ def _handle_baseline_command(args: argparse.Namespace) -> int:
 
 def _handle_campaign_command(args: argparse.Namespace) -> int:
     phases = _unique_phases(args.phases)
-    unsupported = [phase for phase in phases if phase != "baseline"]
+    unsupported = [phase for phase in phases if phase not in {"baseline", "fault"}]
     if unsupported:
         print(
             "phase(s) not implemented yet: "
             + ", ".join(unsupported)
-            + ". Implemented phases: baseline",
+            + ". Implemented phases: baseline, fault",
             file=sys.stderr,
         )
         return 2
-    return _run_baseline(args, phases=["baseline"])
+    if phases == ["baseline"]:
+        return _run_baseline(args, phases=["baseline"])
+    if phases == ["fault"]:
+        return _run_fault(args, phases=["fault"])
+    baseline_code = _run_baseline(args, phases=["baseline"])
+    if baseline_code != 0:
+        return baseline_code
+    return _run_fault(args, phases=["fault"])
 
 
 def _run_baseline(args: argparse.Namespace, *, phases: list[str]) -> int:
@@ -434,6 +486,55 @@ def _run_baseline(args: argparse.Namespace, *, phases: list[str]) -> int:
     return 0
 
 
+def _run_fault(args: argparse.Namespace, *, phases: list[str]) -> int:
+    spec = ReliabilitySpec(
+        benchmark=args.benchmark,
+        agents=_unique_agents(args.agents),
+        phases=phases,
+        seed=args.seed,
+        strict_identity_tags=args.strict_identity_tags,
+        concurrency=OrchestratorConcurrency(
+            orchestrator_mode=args.orchestrator_mode,
+            orchestrator_workers=args.orchestrator_workers,
+            max_tasks=args.max_tasks,
+            max_samples=args.max_samples,
+            max_subprocesses=args.max_subprocesses,
+            max_sandboxes=args.max_sandboxes,
+            max_connections=args.max_connections,
+        ),
+    )
+    fault = FaultSpec(
+        surface=args.fault_surface,
+        mode=args.fault_mode,
+        probability=args.fault_probability,
+        severity=args.fault_severity,
+        delay_seconds=args.fault_delay_seconds,
+        target=args.fault_target,
+    )
+    config = FaultPhaseConfig(
+        repeats=args.repeats,
+        campaign_id=args.campaign_id,
+        log_root=args.log_root,
+        model=args.model,
+        task_args=_parse_key_value_pairs(args.task_arg),
+        inject_agent_task_arg=args.inject_agent_task_arg,
+        metadata=_parse_key_value_pairs(args.metadata),
+        sandbox=args.sandbox,
+        limit=_parse_limit_arg(args.limit),
+        sample_id=_parse_sample_id_arg(args.sample_id),
+        seed=args.seed,
+        faults=[fault],
+        replace_native_web_search=args.replace_native_web_search,
+    )
+    result = run_fault_phase(
+        spec=spec,
+        tasks=args.tasks,
+        config=config,
+    )
+    _print_fault_result(result, json_output=args.json)
+    return 0
+
+
 def _handle_analyze_command(args: argparse.Namespace) -> int:
     result = analyze_phase(
         benchmark=args.benchmark,
@@ -455,6 +556,22 @@ def _print_baseline_result(result: BaselinePhaseResult, *, json_output: bool) ->
 
     print(
         "Baseline reliability run complete: "
+        f"benchmark={result.benchmark} repeats={result.repeats} "
+        f"campaign_id={result.campaign_id}"
+    )
+    for row in result.results:
+        print(
+            f"- agent={row.agent} repeat={row.repeat_id} "
+            f"logs={len(row.log_paths)}"
+        )
+
+
+def _print_fault_result(result: FaultPhaseResult, *, json_output: bool) -> None:
+    if json_output:
+        print(json.dumps(result.model_dump(), indent=2))
+        return
+    print(
+        "Fault reliability run complete: "
         f"benchmark={result.benchmark} repeats={result.repeats} "
         f"campaign_id={result.campaign_id}"
     )

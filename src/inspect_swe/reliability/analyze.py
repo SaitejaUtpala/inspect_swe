@@ -11,7 +11,7 @@ from inspect_ai.log import read_eval_log
 from pydantic import BaseModel, Field
 
 from .eval_view import BaselineSampleView, extract_baseline_sample_views
-from .metrics import compute_baseline_metrics
+from .metrics import compute_baseline_metrics, compute_fault_metrics
 from .spec import PhaseName
 
 
@@ -36,7 +36,7 @@ def analyze_phase(
 ) -> PhaseAnalyzeResult:
     """Analyze one reliability phase and write a `.log` artifact."""
     output_log_path = str(_analysis_log_path(log_root, benchmark, campaign_id, phase))
-    if phase != "baseline":
+    if phase not in {"baseline", "fault"}:
         result = PhaseAnalyzeResult(
             benchmark=benchmark,
             campaign_id=campaign_id,
@@ -48,9 +48,42 @@ def analyze_phase(
         _write_analysis_log(result)
         return result
 
-    eval_paths, views = _load_baseline_views(
+    if phase == "fault":
+        baseline_paths, baseline_views = _load_phase_views(
+            benchmark=benchmark,
+            campaign_id=campaign_id,
+            phase="baseline",
+            log_root=log_root,
+            agent=agent,
+        )
+        fault_paths, fault_views = _load_phase_views(
+            benchmark=benchmark,
+            campaign_id=campaign_id,
+            phase="fault",
+            log_root=log_root,
+            agent=agent,
+        )
+        metrics = compute_fault_metrics(
+            baseline_views=baseline_views,
+            baseline_eval_paths=baseline_paths,
+            fault_views=fault_views,
+            fault_eval_paths=fault_paths,
+        )
+        result = PhaseAnalyzeResult(
+            benchmark=benchmark,
+            campaign_id=campaign_id,
+            phase=phase,
+            status="ok",
+            metrics=metrics,
+            output_log_path=output_log_path,
+        )
+        _write_analysis_log(result)
+        return result
+
+    eval_paths, views = _load_phase_views(
         benchmark=benchmark,
         campaign_id=campaign_id,
+        phase="baseline",
         log_root=log_root,
         agent=agent,
     )
@@ -67,15 +100,16 @@ def analyze_phase(
     return result
 
 
-def _load_baseline_views(
+def _load_phase_views(
     *,
     benchmark: str,
     campaign_id: str,
+    phase: str,
     log_root: str,
     agent: str | None,
 ) -> tuple[list[Path], list[BaselineSampleView]]:
-    baseline_dir = Path(log_root) / benchmark / "baseline" / campaign_id
-    eval_paths = sorted(baseline_dir.glob("**/*.eval"))
+    phase_dir = Path(log_root) / benchmark / phase / campaign_id
+    eval_paths = sorted(phase_dir.glob("**/*.eval"))
     views: list[BaselineSampleView] = []
     for eval_path in eval_paths:
         eval_log = read_eval_log(str(eval_path), header_only=False)
@@ -84,7 +118,7 @@ def _load_baseline_views(
         run_agent = agent or _to_text(run_metadata.get("reliability_agent")) or "unknown_agent"
         run_views, _ = extract_baseline_sample_views(
             eval_log,
-            expected_phase="baseline",
+            expected_phase=phase,
             expected_agent=run_agent,
             expected_repeat_id=run_repeat_id,
             strict_identity_tags=True,

@@ -17,6 +17,8 @@ from .concurrency import (
     validate_orchestrator_policy,
 )
 from .eval_view import BaselineSampleView, extract_baseline_sample_views
+from .fault import FaultPhaseResult, FaultRepeatResult, run_fault_phase
+from .faults import FaultPhaseConfig, FaultSpec
 from .spec import PhaseName, ReliabilitySpec
 
 __all__ = [
@@ -26,12 +28,17 @@ __all__ = [
     "BaselinePhaseResult",
     "BaselineRepeatResult",
     "ConcurrencyPolicyError",
+    "FaultPhaseConfig",
+    "FaultPhaseResult",
+    "FaultRepeatResult",
+    "FaultSpec",
     "OrchestratorConcurrency",
     "PhaseName",
     "BaselineSampleView",
     "ReliabilitySpec",
     "analyze_phase",
     "extract_baseline_sample_views",
+    "run_fault_phase",
     "run_baseline_phase",
     "validate_orchestrator_policy",
 ]
