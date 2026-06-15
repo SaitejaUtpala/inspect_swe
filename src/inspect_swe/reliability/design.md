@@ -68,6 +68,32 @@ In inspected GAIA traces, Codex can recover by issuing a later `exec_command`.
 - `FaultSpec`: surface, mode, probability, severity, and optional target.
 - `FaultEnvironment`: deterministic fault decisions and model/tool wrappers.
 
+## Structural Perturbation Hooks
+
+Structural robustness changes the surface the agent sees while keeping the task
+answer fixed. The hook depends on which surface we are changing.
+
+GAIA prompt changes happen in a solver wrapper over `TaskState.user_prompt`. That
+is the cleanest place because the task question exists there before Codex starts.
+If we changed the initial prompt in a model filter, we would have to detect the
+first model call, find the original user message, avoid mutating it again on
+retries, and then explain why the task prompt in the state does not match what
+Codex saw.
+
+GAIA tool-output changes use a `GenerateFilter`. Tool observations arrive later,
+after the agent has already called a tool, so the filter is the right boundary:
+it can rewrite the model-facing observation before the next model call without
+changing the underlying tool execution.
+
+TauBench-style perturbations use bridged tool wrappers. The surface being tested
+is the typed API contract: parameter names, required fields, and JSON result
+shape. The wrapper can advertise a perturbed schema to Codex, translate arguments
+back to the real names before execution, and perturb the returned JSON. A model
+filter sees messages, but it does not cleanly own that tool schema/execution
+boundary.
+
+So the rule is: use the narrowest hook that owns the thing being perturbed.
+
 ## Fault Rate
 
 For `exec_observation_error`, probability is applied per new eligible

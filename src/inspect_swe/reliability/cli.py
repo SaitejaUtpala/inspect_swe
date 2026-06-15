@@ -11,6 +11,7 @@ from .concurrency import OrchestratorConcurrency
 from .fault import run_fault_phase
 from .faults import FaultPhaseConfig, FaultSpec
 from .spec import ReliabilitySpec
+from .structural import StructuralPhaseConfig, run_structural_phase
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -26,13 +27,15 @@ def main(argv: list[str] | None = None) -> int:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="inspect-swe-reliability")
     subparsers = parser.add_subparsers(dest="command")
-    campaign = subparsers.add_parser("campaign", help="run baseline and/or fault phases")
+    campaign = subparsers.add_parser(
+        "campaign", help="run baseline, fault, and/or structural phases"
+    )
     campaign.add_argument("--benchmark", required=True, help="Inspect task name or path")
     campaign.add_argument("--agent", action="append", default=None, help="agent name")
     campaign.add_argument(
         "--phase",
         action="append",
-        choices=["baseline", "fault"],
+        choices=["baseline", "fault", "structural"],
         default=None,
         help="phase to run; can be supplied multiple times",
     )
@@ -66,6 +69,28 @@ def _build_parser() -> argparse.ArgumentParser:
     campaign.add_argument("--fault-severity", type=float, default=1.0)
     campaign.add_argument("--fault-target", default=None)
     campaign.add_argument("--replace-native-web-search", action="store_true")
+    campaign.add_argument(
+        "--structural-strength",
+        default="medium",
+        choices=["mild", "medium", "severe"],
+    )
+    campaign.add_argument(
+        "--structural-kind",
+        default="gaia",
+        choices=["gaia", "taubench"],
+    )
+    campaign.add_argument("--no-structural-baseline", action="store_true")
+    campaign.add_argument(
+        "--taubench-codex-adapter",
+        action="store_true",
+        help="run Tau2 Airline with Codex as the service agent",
+    )
+    campaign.add_argument(
+        "--taubench-message-limit",
+        type=int,
+        default=None,
+        help="maximum user/service-agent turns for the TauBench Codex adapter",
+    )
     return parser
 
 
@@ -98,7 +123,11 @@ def _run_campaign(args: argparse.Namespace) -> int:
         result = run_baseline_phase(
             spec=spec,
             tasks=args.benchmark,
-            config=BaselinePhaseConfig(**shared),
+            config=BaselinePhaseConfig(
+                **shared,
+                taubench_codex_adapter=args.taubench_codex_adapter,
+                taubench_message_limit=args.taubench_message_limit,
+            ),
         )
         output["baseline"] = result.model_dump()
     if "fault" in phases:
@@ -120,6 +149,21 @@ def _run_campaign(args: argparse.Namespace) -> int:
             ),
         )
         output["fault"] = result.model_dump()
+    if "structural" in phases:
+        result = run_structural_phase(
+            spec=spec,
+            tasks=args.benchmark,
+            config=StructuralPhaseConfig(
+                **shared,
+                seed=args.seed,
+                strength=args.structural_strength,
+                kind=args.structural_kind,
+                include_baseline=not args.no_structural_baseline,
+                taubench_codex_adapter=args.taubench_codex_adapter,
+                taubench_message_limit=args.taubench_message_limit,
+            ),
+        )
+        output["structural"] = result.model_dump()
 
     print(json.dumps(output, indent=2, sort_keys=True))
     return 0

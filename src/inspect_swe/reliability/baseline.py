@@ -51,6 +51,8 @@ class BaselinePhaseConfig(BaseModel):
     limit: int | tuple[int, int] | None = None
     sample_id: str | int | list[str] | list[int] | list[str | int] | None = None
     compute_confidence: bool = True
+    taubench_codex_adapter: bool = False
+    taubench_message_limit: int | None = None
 
     @field_validator("campaign_id")
     @classmethod
@@ -178,7 +180,7 @@ def _run_single_repeat(
         eval_kwargs["task_args"] = run_task_args
     if config.model is not None:
         eval_kwargs["model"] = config.model
-    solver_value = config.solver or _default_solver_for_agent(agent)
+    solver_value = config.solver or _default_solver_for_agent_with_config(agent, config)
     if config.compute_confidence:
         solver_value = _wrap_solver_with_confidence(solver_value)
     if solver_value is not None:
@@ -215,6 +217,19 @@ def _default_solver_for_agent(agent: str) -> Any | None:
 
         return opencode()
     return None
+
+
+def _default_solver_for_agent_with_config(
+    agent: str,
+    config: BaselinePhaseConfig,
+) -> Any | None:
+    if agent == "codex_cli" and config.taubench_codex_adapter:
+        from .taubench import tau2_airline_codex_solver
+
+        return tau2_airline_codex_solver(
+            message_limit=config.taubench_message_limit,
+        )
+    return _default_solver_for_agent(agent)
 
 
 def _wrap_solver_with_confidence(base_solver: Any | None) -> Solver | Any | None:

@@ -67,6 +67,65 @@ View logs:
 conda run -n inspect_swe_new inspect view --log-dir logs/reliability_migration_fault_tolerant
 ```
 
+## Structural Robustness
+
+Structural robustness measures whether Codex handles harmless changes to the
+surface of the task. For GAIA, that means prompt formatting, instruction wording,
+number/date formatting, and later free-text observation wrapping. For TauBench,
+it means the typed tool/API surface: parameter names, required fields, and JSON
+result shape.
+
+The clean workflow is to run `k` baselines first as their own phase, then run
+structural perturbations separately. That keeps the clean anchor reusable across
+`mild`, `medium`, and `severe` runs instead of paying for a new baseline inside
+each structural command.
+
+Run the GAIA baseline anchor:
+
+```bash
+cd /Users/saitejautpala/work/hal_explore/inspect_swe_new/inspect_swe
+TASK="/Users/saitejautpala/miniconda3/envs/inspect_swe_new/lib/python3.12/site-packages/inspect_evals/gaia/gaia.py@gaia_level1"
+
+conda run -n inspect_swe_new python -m inspect_swe.reliability.cli campaign \
+  --benchmark "$TASK" \
+  --phase baseline \
+  --agent codex_cli \
+  --model openai/gpt-5.5 \
+  --repeats 3 \
+  --limit 10 \
+  --max-samples 4 \
+  --sandbox docker \
+  --no-compute-confidence \
+  --log-root logs/reliability/gaia_structural_10
+```
+
+Then run the perturbed structural passes:
+
+```bash
+for strength in mild medium severe; do
+  conda run -n inspect_swe_new python -m inspect_swe.reliability.cli campaign \
+    --benchmark "$TASK" \
+    --phase structural \
+    --agent codex_cli \
+    --model openai/gpt-5.5 \
+    --repeats 1 \
+    --limit 10 \
+    --max-samples 4 \
+    --sandbox docker \
+    --structural-kind gaia \
+    --structural-strength "$strength" \
+    --no-structural-baseline \
+    --no-compute-confidence \
+    --log-root logs/reliability/gaia_structural_10 \
+    2>&1 | tee "logs/reliability/gaia_structural_10/gaia_struct_${strength}_10.out"
+done
+```
+
+`--no-structural-baseline` is intentional here. It says: only run the perturbed
+structural pass, because the clean baselines already exist. If you omit it, the
+structural runner will create a baseline and perturbed pair inside each
+structural campaign, which is easier to inspect but more expensive.
+
 Dump one `.eval` to JSON:
 
 ```bash
@@ -81,6 +140,8 @@ conda run -n inspect_swe_new python -c "from inspect_ai.log import read_eval_log
 - GAIA Level 1, `codex_cli`, GPT-5.5, `limit=12`, `max_samples=6`, `p=0.5` completed successfully.
 - A `p=1.0` smoke run confirmed the injected observation appears in the model-facing log view.
 - The fault is scoped to `ChatMessageTool(function="exec_command")`; it does not change web search behavior.
+- GAIA structural runs with `codex_cli` and GPT-5.5 have completed for
+  `mild`, `medium`, and `severe` perturbation strengths on 10 examples.
 
 ## Probability Semantics
 
