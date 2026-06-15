@@ -215,6 +215,9 @@ logs*/
 # Local experiment tasks
 slice_tests/
 
+# Local screenshots/assets
+assets/
+
 # MacOS
 .DS_Store
 
