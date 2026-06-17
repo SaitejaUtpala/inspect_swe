@@ -115,13 +115,13 @@ the model. The benchmark state and scorer stay anchored to the actual function.
 
 ```mermaid
 flowchart LR
-    A[Actual Python tool<br/>tool_name(original_arg)] --> B[Structural wrapper]
-    B -->|advertises perturbed schema| C[Codex sees<br/>tool_name(perturbedArg)]
+    A["Actual Python tool: original_arg"] --> B["Structural wrapper"]
+    B -->|advertises perturbed schema| C["Codex sees: perturbedArg"]
     C -->|calls with perturbed args| B
-    B -->|reverse args| A
+    B -->|reverses args| A
     A -->|real result| B
-    B -->|perturb observation| C
-    A --> D[Unchanged benchmark state + scorer]
+    B -->|perturbs observation| C
+    A --> D["Unchanged benchmark state and scorer"]
 ```
 
 Simple generic example:
