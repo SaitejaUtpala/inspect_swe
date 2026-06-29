@@ -134,7 +134,13 @@ conda run -n inspect_swe_new python -c "from inspect_ai.log import read_eval_log
 
 ## What Has Been Tested
 
-- Focused reliability tests pass: `11 passed`.
+- Reliability branch assessed against upstream `inspect_swe` `0.2.63-11-gf86c551`
+  (`upstream/main` commit `f86c551`, merge base `bc37fce`). The reliability
+  package is branch-local custom code and must be preserved when merging upstream.
+- Focused reliability tests pass: `24 passed`.
+- Focused reliability tests cover Codex and Claude default solver construction,
+  Codex structural wrapper kwargs, TauBench tool schema perturbation/reversal,
+  and exec-observation fault injection.
 - Ruff checks pass for `src/inspect_swe/reliability` and the reliability tests.
 - GAIA Level 1, `codex_cli`, GPT-5.4, `limit=8`, `max_samples=4`, `p=0.8` completed successfully.
 - GAIA Level 1, `codex_cli`, GPT-5.5, `limit=12`, `max_samples=6`, `p=0.5` completed successfully.

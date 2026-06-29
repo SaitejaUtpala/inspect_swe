@@ -9,6 +9,7 @@ from inspect_swe.reliability.concurrency import OrchestratorConcurrency
 from inspect_swe.reliability.spec import ReliabilitySpec
 from inspect_swe.reliability.structural import (
     StructuralPhaseConfig,
+    _default_structural_solver_for_agent,
     run_structural_phase,
 )
 from inspect_swe.reliability.structural_perturbations import (
@@ -269,6 +270,38 @@ def test_structural_runner_uses_taubench_codex_adapter(monkeypatch) -> None:
     assert adapter_calls[0]["message_limit"] == 30
     assert adapter_calls[0]["structural_env"].kind == "taubench"
     assert adapter_calls[0]["structural_env"].strength == "mild"
+
+
+def test_structural_codex_default_kwargs_follow_current_agent_api(monkeypatch) -> None:
+    calls = {}
+
+    def fake_codex_cli(**kwargs):
+        calls.update(kwargs)
+        return "codex-agent"
+
+    monkeypatch.setattr("inspect_swe.codex_cli", fake_codex_cli)
+    monkeypatch.setattr(
+        "inspect_swe.reliability.structural.as_solver",
+        lambda solver_value: ("solver", solver_value),
+    )
+    env = StructuralEnvironment(
+        kind="gaia",
+        strength="medium",
+        context=StructuralContext(campaign_id="campaign", agent="codex_cli", repeat_id=0),
+    )
+
+    solver = _default_structural_solver_for_agent(
+        "codex_cli",
+        env,
+        StructuralPhaseConfig(kind="gaia", compute_confidence=False),
+        perturbed=True,
+    )
+
+    assert solver == ("solver", "codex-agent")
+    assert callable(calls["filter"])
+    assert calls["bridged_tools"] is None
+    assert calls["retry_refusals"] == 3
+    assert "version" not in calls
 
 
 def _capture_flight_tool(calls: dict[str, str]) -> Tool:

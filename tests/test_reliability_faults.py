@@ -195,6 +195,21 @@ def test_baseline_codex_default_uses_fresh_default_constructor(monkeypatch) -> N
     assert "version" not in calls
 
 
+def test_baseline_claude_default_uses_fresh_default_constructor(monkeypatch) -> None:
+    calls = {}
+
+    def fake_claude_code(**kwargs):
+        calls.update(kwargs)
+        return object()
+
+    import inspect_swe
+
+    monkeypatch.setattr(inspect_swe, "claude_code", fake_claude_code)
+
+    assert _default_solver_for_agent("claude_code") is not None
+    assert calls == {}
+
+
 def test_benchmark_log_slug_keeps_file_task_refs_under_log_root() -> None:
     slug = _benchmark_log_slug("/tmp/site-packages/inspect_evals/gaia/gaia.py@gaia_level1")
 
