@@ -68,7 +68,6 @@ def _build_parser() -> argparse.ArgumentParser:
     campaign.add_argument("--fault-probability", type=float, default=0.2)
     campaign.add_argument("--fault-severity", type=float, default=1.0)
     campaign.add_argument("--fault-target", default=None)
-    campaign.add_argument("--replace-native-web-search", action="store_true")
     campaign.add_argument(
         "--structural-strength",
         default="medium",
@@ -145,7 +144,6 @@ def _run_campaign(args: argparse.Namespace) -> int:
                 **shared,
                 seed=args.seed,
                 faults=[fault],
-                replace_native_web_search=args.replace_native_web_search,
             ),
         )
         output["fault"] = result.model_dump()

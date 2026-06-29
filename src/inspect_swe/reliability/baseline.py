@@ -18,6 +18,7 @@ from .concurrency import validate_orchestrator_policy
 from .spec import ReliabilitySpec
 
 RELIABILITY_CODEX_CLI_VERSION = "0.142.4"
+RELIABILITY_CLAUDE_CODE_VERSION = "2.1.181"
 
 
 class BaselineExecutionError(RuntimeError):
@@ -205,7 +206,7 @@ def _default_solver_for_agent(agent: str) -> Any | None:
     if agent == "claude_code":
         from inspect_swe import claude_code
 
-        return claude_code()
+        return claude_code(version=RELIABILITY_CLAUDE_CODE_VERSION)
     if agent == "gemini_cli":
         from inspect_swe import gemini_cli
 

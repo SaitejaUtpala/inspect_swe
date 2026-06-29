@@ -8,11 +8,12 @@ from typing import Any
 from uuid import uuid4
 
 from inspect_ai import eval
-from inspect_ai.agent import as_solver, is_agent
+from inspect_ai.agent import as_solver
 from inspect_ai.log import EvalLog
 from pydantic import BaseModel
 
 from .baseline import (
+    RELIABILITY_CLAUDE_CODE_VERSION,
     RELIABILITY_CODEX_CLI_VERSION,
     _benchmark_log_slug,
     _wrap_solver_with_confidence,
@@ -20,7 +21,6 @@ from .baseline import (
 )
 from .concurrency import validate_orchestrator_policy
 from .faults import FaultContext, FaultEnvironment, FaultPhaseConfig
-from .search_tool import reliability_search_bridged_tools
 from .spec import ReliabilitySpec
 
 
@@ -95,8 +95,8 @@ def _run_single_fault_repeat(
         ),
     )
     solver_value = config.solver or _default_fault_solver_for_agent(agent, fault_env, config)
-    if solver_value is not None and not is_agent(solver_value):
-        solver_value = fault_env.wrap_solver(solver_value)
+    if solver_value is not None:
+        solver_value = fault_env.wrap_solver(as_solver(solver_value))
     if config.compute_confidence:
         solver_value = _wrap_solver_with_confidence(solver_value)
 
@@ -167,23 +167,22 @@ def _default_fault_solver_for_agent(
     if agent == "claude_code":
         from inspect_swe import claude_code
 
-        solver_value = claude_code()
-        return fault_env.wrap_solver(as_solver(solver_value))
+        return claude_code(
+            filter=fault_env.model_filter(),
+            version=RELIABILITY_CLAUDE_CODE_VERSION,
+        )
     if agent == "gemini_cli":
         from inspect_swe import gemini_cli
 
-        solver_value = gemini_cli()
-        return fault_env.wrap_solver(as_solver(solver_value))
+        return gemini_cli()
     if agent == "mini_swe_agent":
         from inspect_swe import mini_swe_agent
 
-        solver_value = mini_swe_agent()
-        return fault_env.wrap_solver(as_solver(solver_value))
+        return mini_swe_agent()
     if agent == "opencode":
         from inspect_swe import opencode
 
-        solver_value = opencode()
-        return fault_env.wrap_solver(as_solver(solver_value))
+        return opencode()
     return None
 
 
@@ -195,11 +194,6 @@ def _codex_cli_fault_kwargs(
         "retry_refusals": 3,
         "version": RELIABILITY_CODEX_CLI_VERSION,
     }
-    if config.replace_native_web_search:
-        kwargs["bridged_tools"] = fault_env.wrap_bridged_tools(
-            reliability_search_bridged_tools()
-        )
-        kwargs["disallowed_tools"] = ["web_search"]
     return kwargs
 
 

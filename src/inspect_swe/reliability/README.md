@@ -1,8 +1,8 @@
 # Reliability
 
 This package contains reliability runners for `inspect_swe`. The current tested
-path is baseline/fault evals for Codex CLI, with emphasis on `exec_command`
-observation faulting.
+path covers baseline/fault/structural evals for Codex CLI and Claude Code, with
+emphasis on shell observation faulting.
 
 ## Exec Command Faulting
 
@@ -13,8 +13,9 @@ The main fault tested so far is:
 ```
 
 It does not modify the command the agent requested. Codex is still allowed to
-call `exec_command` normally. After the tool returns, the model-facing tool
-observation can be replaced with a realistic shell failure:
+call `exec_command`, and Claude Code is still allowed to call `Bash`. After the
+tool returns, the model-facing shell observation can be replaced with a realistic
+shell failure:
 
 ```text
 Command: /bin/bash -lc <redacted>
@@ -26,8 +27,13 @@ bash: fork: Resource temporarily unavailable
 ```
 
 This keeps the protocol valid. The model sees a normal tool result, but the
-result represents a failed command. Codex can then retry, reason around the
+result represents a failed command. The agent can then retry, reason around the
 failure, or give a final answer.
+
+Current reliability agent pins:
+
+- Codex CLI: `0.142.4`
+- Claude Code: `2.1.181`
 
 ## Run GAIA Exec Fault Evals
 
@@ -137,7 +143,7 @@ conda run -n inspect_swe_new python -c "from inspect_ai.log import read_eval_log
 - Reliability branch assessed against upstream `inspect_swe` `0.2.63-11-gf86c551`
   (`upstream/main` commit `f86c551`, merge base `bc37fce`). The reliability
   package is branch-local custom code and must be preserved when merging upstream.
-- Focused reliability tests pass: `24 passed`.
+- Focused reliability tests pass: `33 passed`.
 - Focused reliability tests cover Codex and Claude default solver construction,
   Codex structural wrapper kwargs, TauBench tool schema perturbation/reversal,
   and exec-observation fault injection.
@@ -145,7 +151,11 @@ conda run -n inspect_swe_new python -c "from inspect_ai.log import read_eval_log
 - GAIA Level 1, `codex_cli`, GPT-5.4, `limit=8`, `max_samples=4`, `p=0.8` completed successfully.
 - GAIA Level 1, `codex_cli`, GPT-5.5, `limit=12`, `max_samples=6`, `p=0.5` completed successfully.
 - A `p=1.0` smoke run confirmed the injected observation appears in the model-facing log view.
-- The fault is scoped to `ChatMessageTool(function="exec_command")`; it does not change web search behavior.
+- The shell fault is scoped to `ChatMessageTool(function="exec_command")` for
+  Codex CLI and `ChatMessageTool(function="Bash")` for Claude Code; it does not
+  change web search behavior.
+- Claude Code GAIA Level 1, Opus 4.8, `limit=1`, `max_samples=1`, `p=1.0`
+  smoke confirmed `Bash` observations are faulted in the model-facing log view.
 - GAIA structural runs with `codex_cli` and GPT-5.5 have completed for
   `mild`, `medium`, and `severe` perturbation strengths on 10 examples.
 

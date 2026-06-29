@@ -6,11 +6,15 @@ from inspect_ai.model import (
     ModelOutput,
 )
 from inspect_swe.reliability.baseline import (
+    RELIABILITY_CLAUDE_CODE_VERSION,
     RELIABILITY_CODEX_CLI_VERSION,
     _benchmark_log_slug,
     _default_solver_for_agent,
 )
-from inspect_swe.reliability.fault import _codex_cli_fault_kwargs
+from inspect_swe.reliability.fault import (
+    _codex_cli_fault_kwargs,
+    _default_fault_solver_for_agent,
+)
 from inspect_swe.reliability.faults import (
     FaultContext,
     FaultEnvironment,
@@ -76,6 +80,100 @@ async def test_exec_observation_error_calls_model_with_faulted_tool_message() ->
 
 
 @pytest.mark.anyio
+async def test_exec_observation_error_faults_claude_bash_tool_message() -> None:
+    spec = FaultSpec(surface="message", mode="exec_observation_error", probability=1.0)
+    env = FaultEnvironment([spec], _fault_context(agent="claude_code"))
+    model = _CapturingModel()
+    observation = ChatMessageTool(
+        content="17054.888019907572 17.054888019907573 17000\n",
+        function="Bash",
+        tool_call_id="call_bash",
+    )
+
+    result = await env.model_filter()(
+        model,
+        [ChatMessageUser(content="Run the calculation."), observation],
+        [],
+        None,
+        GenerateConfig(),
+    )
+
+    assert isinstance(result, ModelOutput)
+    assert model.last_input is not None
+    faulted_observation = model.last_input[-1]
+    assert isinstance(faulted_observation, ChatMessageTool)
+    assert faulted_observation.function == "Bash"
+    assert faulted_observation.tool_call_id == "call_bash"
+    assert "Command: /bin/bash -lc <redacted>" in faulted_observation.text
+    assert "Process exited with code 254" in faulted_observation.text
+    assert "bash: fork: Resource temporarily unavailable" in faulted_observation.text
+    assert "17054.888019907572" not in faulted_observation.text
+
+
+@pytest.mark.anyio
+async def test_exec_observation_error_refaults_replayed_claude_bash_history() -> None:
+    spec = FaultSpec(surface="message", mode="exec_observation_error", probability=1.0)
+    env = FaultEnvironment([spec], _fault_context(agent="claude_code"))
+    model = _CapturingModel()
+    first_bash = ChatMessageTool(
+        content="attachment://bash-output",
+        function="Bash",
+        tool_call_id="toolu_existing",
+    )
+
+    first_result = await env.model_filter()(
+        model,
+        [ChatMessageUser(content="Calculate."), first_bash],
+        [],
+        None,
+        GenerateConfig(),
+    )
+
+    assert isinstance(first_result, ModelOutput)
+    replayed_bash = ChatMessageTool(
+        content="17054.888019907572 17.054888019907573 17",
+        function="Bash",
+        tool_call_id="toolu_existing",
+    )
+    next_bash = ChatMessageTool(
+        content="attachment://second-bash-output",
+        function="Bash",
+        tool_call_id="toolu_next",
+    )
+
+    second_result = await env.model_filter()(
+        model,
+        [
+            ChatMessageUser(content="Calculate."),
+            replayed_bash,
+            ChatMessageUser(content="Try again."),
+            next_bash,
+        ],
+        [],
+        None,
+        GenerateConfig(),
+    )
+
+    assert isinstance(second_result, ModelOutput)
+    assert model.last_input is not None
+    faulted_bash_observations = [
+        message
+        for message in model.last_input
+        if isinstance(message, ChatMessageTool) and message.function == "Bash"
+    ]
+    assert len(faulted_bash_observations) == 2
+    assert all(
+        "bash: fork: Resource temporarily unavailable" in message.text
+        for message in faulted_bash_observations
+    )
+    assert all(
+        "17054.888019907572" not in message.text
+        for message in faulted_bash_observations
+    )
+    assert len(env.applied_records) == 2
+
+
+@pytest.mark.anyio
 async def test_exec_observation_error_ignores_non_exec_tool_observation() -> None:
     spec = FaultSpec(surface="message", mode="exec_observation_error", probability=1.0)
     env = FaultEnvironment([spec], _fault_context())
@@ -89,6 +187,33 @@ async def test_exec_observation_error_ignores_non_exec_tool_observation() -> Non
                 content="Search result text",
                 function="web_search",
                 tool_call_id="call_web",
+            ),
+        ],
+        [],
+        None,
+        GenerateConfig(),
+    )
+
+    assert result is None
+    assert model.last_input is None
+    assert env.applied_records == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("function", ["WebSearch", "WebFetch", "web_search"])
+async def test_exec_observation_error_ignores_non_shell_tools(function: str) -> None:
+    spec = FaultSpec(surface="message", mode="exec_observation_error", probability=1.0)
+    env = FaultEnvironment([spec], _fault_context(agent="claude_code"))
+    model = _CapturingModel()
+
+    result = await env.model_filter()(
+        model,
+        [
+            ChatMessageUser(content="Search."),
+            ChatMessageTool(
+                content="Search or fetch result text",
+                function=function,
+                tool_call_id=f"call_{function}",
             ),
         ],
         [],
@@ -128,7 +253,7 @@ async def test_exec_observation_error_probability_zero_never_applies() -> None:
 
 
 @pytest.mark.anyio
-async def test_exec_observation_error_does_not_resample_seen_tool_call() -> None:
+async def test_exec_observation_error_refaults_without_resampling_seen_tool_call() -> None:
     spec = FaultSpec(surface="message", mode="exec_observation_error", probability=1.0)
     env = FaultEnvironment([spec], _fault_context())
     model = _CapturingModel()
@@ -145,9 +270,14 @@ async def test_exec_observation_error_does_not_resample_seen_tool_call() -> None
     second = await env.model_filter()(model, messages, [], None, GenerateConfig())
 
     assert isinstance(first, ModelOutput)
-    assert second is None
+    assert isinstance(second, ModelOutput)
     assert len(env.applied_records) == 1
-    assert model.generate_calls == 1
+    assert model.generate_calls == 2
+    assert model.last_input is not None
+    faulted_observation = model.last_input[-1]
+    assert isinstance(faulted_observation, ChatMessageTool)
+    assert "bash: fork: Resource temporarily unavailable" in faulted_observation.text
+    assert "\nok\n" not in faulted_observation.text
 
 
 def test_codex_fault_kwargs_do_not_replace_web_search_by_default() -> None:
@@ -168,17 +298,6 @@ def test_codex_fault_kwargs_do_not_replace_web_search_by_default() -> None:
     assert kwargs["version"] == RELIABILITY_CODEX_CLI_VERSION
     assert "disallowed_tools" not in kwargs
     assert "bridged_tools" not in kwargs
-
-
-def test_codex_fault_kwargs_replaces_native_web_search_only_when_enabled() -> None:
-    kwargs = _codex_cli_fault_kwargs(
-        FaultEnvironment([], _fault_context()),
-        FaultPhaseConfig(replace_native_web_search=True),
-    )
-
-    assert kwargs["version"] == RELIABILITY_CODEX_CLI_VERSION
-    assert kwargs["disallowed_tools"] == ["web_search"]
-    assert kwargs["bridged_tools"][0].name == "reliability_search"
 
 
 def test_baseline_codex_default_uses_fresh_default_constructor(monkeypatch) -> None:
@@ -208,7 +327,27 @@ def test_baseline_claude_default_uses_fresh_default_constructor(monkeypatch) -> 
     monkeypatch.setattr(inspect_swe, "claude_code", fake_claude_code)
 
     assert _default_solver_for_agent("claude_code") is not None
-    assert calls == {}
+    assert calls == {"version": RELIABILITY_CLAUDE_CODE_VERSION}
+
+
+def test_fault_claude_default_passes_filter_to_bridge_agent(monkeypatch) -> None:
+    calls = {}
+
+    def fake_claude_code(**kwargs):
+        calls.update(kwargs)
+        return object()
+
+    import inspect_swe
+
+    monkeypatch.setattr(inspect_swe, "claude_code", fake_claude_code)
+    env = FaultEnvironment(
+        [FaultSpec(surface="message", mode="exec_observation_error", probability=1.0)],
+        _fault_context(agent="claude_code"),
+    )
+
+    assert _default_fault_solver_for_agent("claude_code", env, FaultPhaseConfig()) is not None
+    assert callable(calls["filter"])
+    assert calls["version"] == RELIABILITY_CLAUDE_CODE_VERSION
 
 
 def test_benchmark_log_slug_keeps_file_task_refs_under_log_root() -> None:
@@ -248,11 +387,11 @@ class _CapturingModel:
         return ModelOutput.from_content(self.name, "generated after exec fault")
 
 
-def _fault_context() -> FaultContext:
+def _fault_context(agent: str = "codex_cli") -> FaultContext:
     return FaultContext(
         campaign_id="campaign",
         phase="fault",
-        agent="codex_cli",
+        agent=agent,
         repeat_id=0,
         sample_id="sample",
         seed=0,

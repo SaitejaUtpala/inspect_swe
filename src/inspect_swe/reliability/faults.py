@@ -55,6 +55,15 @@ TEXT_OBSERVATION_FAULT = (
     "paths, syntax, and command output."
 )
 EXEC_OBSERVATION_ERROR = "bash: fork: Resource temporarily unavailable"
+EXEC_OBSERVATION_TOOL_FUNCTIONS_BY_AGENT = {
+    "codex_cli": frozenset({"exec_command"}),
+    "claude_code": frozenset({"Bash"}),
+}
+EXEC_OBSERVATION_TOOL_FUNCTIONS = frozenset(
+    function
+    for functions in EXEC_OBSERVATION_TOOL_FUNCTIONS_BY_AGENT.values()
+    for function in functions
+)
 
 
 class FaultSpec(BaseModel):
@@ -109,7 +118,6 @@ class FaultPhaseConfig(BaseModel):
     compute_confidence: bool = True
     seed: int = 0
     faults: list[FaultSpec] = Field(default_factory=lambda: [FaultSpec()])
-    replace_native_web_search: bool = False
 
     @field_validator("campaign_id")
     @classmethod
@@ -152,7 +160,7 @@ class FaultEnvironment:
         self.context = context
         self._model_call_index = 0
         self._tool_call_index = 0
-        self._seen_exec_observation_ids: set[str] = set()
+        self._exec_observation_fault_decisions: dict[str, bool] = {}
 
     def clone_for_sample(self, sample_id: Any) -> "FaultEnvironment":
         context = self.context.model_copy(update={"sample_id": str(sample_id)})
@@ -227,36 +235,54 @@ class FaultEnvironment:
         config: GenerateConfig,
         call_index: int,
     ) -> ModelOutput | None:
-        observation = _latest_exec_observation(messages)
-        if observation is None:
-            return None
-        tool_call_id = _tool_call_identity(observation)
-        if tool_call_id in self._seen_exec_observation_ids:
+        observations = _exec_observations(messages)
+        if not observations:
             return None
 
-        matched = False
-        for spec in self._matching_specs("message", target="message.exec_command"):
-            if spec.mode != "exec_observation_error":
-                continue
-            matched = True
-            record = self._maybe_apply(
-                spec,
-                f"exec_observation:{call_index}:{model.name}:{tool_call_id}",
-            )
-            if record is None:
-                continue
-            self._seen_exec_observation_ids.add(tool_call_id)
-            faulted_messages = _fault_exec_observation_messages(messages, observation)
+        faulted_ids: set[str] = set()
+        for observation in observations:
+            tool_call_id = _tool_call_identity(observation)
+            if tool_call_id not in self._exec_observation_fault_decisions:
+                self._exec_observation_fault_decisions[tool_call_id] = (
+                    self._decide_exec_observation_fault(
+                        observation=observation,
+                        model=model,
+                        call_index=call_index,
+                        tool_call_id=tool_call_id,
+                    )
+                )
+            if self._exec_observation_fault_decisions[tool_call_id]:
+                faulted_ids.add(tool_call_id)
+
+        if faulted_ids:
+            faulted_messages = _fault_exec_observation_messages(messages, faulted_ids)
             return await model.generate(
                 input=faulted_messages,
                 tools=tools,
                 tool_choice=tool_choice,
                 config=config,
             )
-
-        if matched:
-            self._seen_exec_observation_ids.add(tool_call_id)
         return None
+
+    def _decide_exec_observation_fault(
+        self,
+        *,
+        observation: ChatMessageTool,
+        model: Model,
+        call_index: int,
+        tool_call_id: str,
+    ) -> bool:
+        target = _exec_observation_target(observation)
+        for spec in self._matching_specs("message", target=target):
+            if spec.mode != "exec_observation_error":
+                continue
+            record = self._maybe_apply(
+                spec,
+                f"exec_observation:{call_index}:{model.name}:{tool_call_id}",
+            )
+            if record is not None:
+                return True
+        return False
 
     def _maybe_fault_generate_input(
         self,
@@ -480,18 +506,19 @@ def _faulted_model_output(
     return ModelOutput.from_content(model_name, f"Injected fault applied: {record.mode}")
 
 
-def _latest_exec_observation(messages: list[ChatMessage]) -> ChatMessageTool | None:
-    for message in reversed(messages):
-        if _is_exec_observation(message):
-            return message
-    return None
+def _exec_observations(messages: list[ChatMessage]) -> list[ChatMessageTool]:
+    return [message for message in messages if _is_exec_observation(message)]
 
 
 def _is_exec_observation(message: ChatMessage) -> bool:
     return (
         isinstance(message, ChatMessageTool)
-        and getattr(message, "function", None) == "exec_command"
+        and getattr(message, "function", None) in EXEC_OBSERVATION_TOOL_FUNCTIONS
     )
+
+
+def _exec_observation_target(message: ChatMessageTool) -> str:
+    return f"message.{getattr(message, 'function', '')}"
 
 
 def _tool_call_identity(message: ChatMessageTool) -> str:
@@ -502,15 +529,16 @@ def _tool_call_identity(message: ChatMessageTool) -> str:
 
 
 def _fault_exec_observation_messages(
-    messages: list[ChatMessage], observation: ChatMessageTool
+    messages: list[ChatMessage], faulted_ids: set[str]
 ) -> list[ChatMessage]:
     faulted = list(messages)
-    for index in range(len(faulted) - 1, -1, -1):
-        if faulted[index] is observation:
-            faulted[index] = observation.model_copy(
-                update={"content": _exec_observation_error_text(observation)}
+    for index, message in enumerate(faulted):
+        if not isinstance(message, ChatMessageTool):
+            continue
+        if _tool_call_identity(message) in faulted_ids:
+            faulted[index] = message.model_copy(
+                update={"content": _exec_observation_error_text(message)}
             )
-            break
     return faulted
 
 
