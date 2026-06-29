@@ -13,7 +13,7 @@ from inspect_ai.agent import (
     is_agent,
     sandbox_agent_bridge,
 )
-from inspect_ai.model import ChatMessageTool, GenerateConfig, ModelOutput
+from inspect_ai.model import ChatMessageTool, GenerateConfig, ModelOutput, get_model
 from inspect_ai.tool import ToolError, ToolInfo, ToolParams
 from inspect_ai.util import StoreModel, checkpointer, store_as
 
@@ -27,6 +27,13 @@ def test_sandbox_agent_bridge_supports_checkpointer_kwarg() -> None:
         "Update inspect_ai from the dependency in pyproject.toml before running "
         "Claude Code or Codex CLI evaluations."
     )
+
+
+def test_anthropic_provider_can_be_constructed_for_claude_code_models() -> None:
+    """Fail fast when Inspect's Anthropic provider prerequisites are stale."""
+    model = get_model("anthropic/claude-opus-4-8")
+
+    assert model.name == "claude-opus-4-8"
 
 
 def test_sandbox_agent_bridge_supports_model_event_sink_kwarg() -> None:
