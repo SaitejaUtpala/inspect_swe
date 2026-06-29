@@ -25,6 +25,7 @@ from inspect_swe._util._async import is_callable_coroutine
 from inspect_swe._util.centaur import CentaurOptions, run_centaur
 from inspect_swe._util.messages import build_user_prompt
 from inspect_swe._util.path import join_path
+from inspect_swe._util.sandbox import resolve_agent_cwd
 from inspect_swe._util.trace import trace
 
 from .agentbinary import ensure_gemini_cli_setup
@@ -53,6 +54,7 @@ def gemini_cli(
     user: str | None = None,
     sandbox: str | None = None,
     version: Literal["auto", "sandbox", "stable", "latest"] | str = "auto",
+    debug: bool | None = None,
 ) -> Agent:
     """Gemini CLI agent.
 
@@ -89,6 +91,7 @@ def gemini_cli(
             - "sandbox": Use sandbox version (raises RuntimeError if not available)
             - "stable"/"latest": Download and use the latest version
             - "x.x.x": Download and use a specific version
+        debug: Trace all debug output.
     """
     # resolve centaur
     if centaur is True:
@@ -122,12 +125,12 @@ def gemini_cli(
             # resolve sandbox
             sbox = sandbox_env(sandbox)
 
+            # resolve working directory (home dir if sandbox default is '/')
+            agent_cwd = await resolve_agent_cwd(sbox, user, cwd)
+
             # install skills
             if resolved_skills is not None:
-                GEMINI_SKILLS = ".gemini/skills"
-                skills_dir = (
-                    join_path(cwd, GEMINI_SKILLS) if cwd is not None else GEMINI_SKILLS
-                )
+                skills_dir = join_path(agent_cwd, ".gemini/skills")
                 await install_skills(resolved_skills, sbox, user, skills_dir)
 
             # install node and gemini-cli in sandbox
@@ -227,7 +230,7 @@ def gemini_cli(
                         cmd=["bash", "-c", 'exec 0</dev/null; "$@"', "bash"]
                         + agent_cmd,
                         options=ExecRemoteAwaitableOptions(
-                            cwd=cwd,
+                            cwd=agent_cwd,
                             env=agent_env,
                             user=user,
                             concurrency=False,
@@ -236,8 +239,9 @@ def gemini_cli(
                     )
 
                     # track debug output
-                    debug_output.append(result.stdout)
-                    debug_output.append(result.stderr)
+                    if debug:
+                        debug_output.append(result.stdout)
+                        debug_output.append(result.stderr)
 
                     # raise for error
                     if not result.success:
@@ -272,8 +276,9 @@ def gemini_cli(
                         agent_prompt = attempts.incorrect_message
 
                 # trace debug output
-                debug_output.insert(0, "Gemini CLI Debug Output:")
-                trace("\n".join(debug_output))
+                if debug:
+                    debug_output.insert(0, "Gemini CLI Debug Output:")
+                    trace("\n".join(debug_output))
 
         return bridge.state
 
@@ -284,6 +289,16 @@ def build_gemini_settings(mcp_servers: Sequence[MCPServerConfig]) -> str:
     """Build Gemini CLI settings.json content (privacy + MCP server configs)."""
     settings: dict[str, Any] = {
         "privacy": {"usageStatisticsEnabled": False},
+        # Pin the auth type to the Gemini API key. As of recent gemini-cli
+        # releases, getAuthTypeFromEnv() resolves auth to the new
+        # AuthType.GATEWAY whenever GOOGLE_GEMINI_BASE_URL is set (which we set
+        # to point at the Inspect bridge) — and it checks that *before*
+        # GEMINI_API_KEY. But validateAuthMethod() has no case for GATEWAY, so
+        # non-interactive runs fail with "Invalid auth method selected." Forcing
+        # selectedType="gemini-api-key" uses the USE_GEMINI path (which passes
+        # validation since GEMINI_API_KEY is set) while still honoring
+        # GOOGLE_GEMINI_BASE_URL for the base URL, keeping traffic on the bridge.
+        "security": {"auth": {"selectedType": "gemini-api-key"}},
     }
     if mcp_servers:
         mcp_servers_config: dict[str, Any] = {}

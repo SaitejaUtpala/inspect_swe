@@ -19,13 +19,13 @@ from inspect_ai.tool import MCPServerConfig, Skill, install_skills, read_skills
 from inspect_ai.util import (
     ExecRemoteStreamingOptions,
     StoreModel,
+    checkpointer,
     store,
     store_as,
 )
 from inspect_ai.util import (
     sandbox as sandbox_env,
 )
-from inspect_ai.util._span import current_span_id
 from pydantic import Field
 from pydantic_core import to_json
 
@@ -43,9 +43,10 @@ from inspect_swe._util.path import join_path
 from .._util._async import is_callable_coroutine
 from .._util.agentbinary import ensure_agent_binary_installed
 from .._util.messages import build_user_prompt
-from .._util.model import inspect_model
+from .._util.sandbox import resolve_agent_cwd
 from .._util.trace import trace
 from .agentbinary import claude_code_binary_source
+from .model import resolve_claude_code_models
 
 
 @agent
@@ -63,6 +64,7 @@ def claude_code(
     centaur: bool | CentaurOptions = False,
     attempts: int | AgentAttempts = 1,
     model: str | None = None,
+    model_config: str | None = None,
     model_aliases: dict[str, str | Model] | None = None,
     opus_model: str | None = None,
     sonnet_model: str | None = None,
@@ -75,9 +77,9 @@ def claude_code(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     user: str | None = None,
-    debug: bool | None = None,
     sandbox: str | None = None,
     version: Literal["auto", "sandbox", "stable", "latest"] | str = "auto",
+    debug: bool | None = None,
 ) -> Agent:
     """Claude Code agent.
 
@@ -103,6 +105,14 @@ def claude_code(
         centaur: Run in 'centaur' mode, which makes Claude Code available to an Inspect `human_cli()` agent rather than running it unattended.
         attempts: Configure agent to make multiple attempts. When this is specified, the task will be scored when the agent stops calling tools. If the scoring is successful, execution will stop. Otherwise, the agent will be prompted to pick up where it left off for another attempt.
         model: Model name to use for Opus and Sonnet calls (defaults to main model for task).
+        model_config: Model id used to select the identity Claude Code presents
+            to itself (its "You are powered by the model ..." system prompt) and
+            any model-gated client behavior. Defaults to `None`, which derives it
+            from the real served model so the presented identity matches what's
+            actually running. Purely the displayed identity — calls are still
+            bridged to the served Inspect model regardless. (Claude Code renders
+            the genuine name/cutoff for recognized Anthropic ids and shows other
+            ids verbatim.)
         model_aliases: Optional mapping of model names to Model instances or model name strings.
             Allows using custom Model implementations (e.g., wrapped Agents) instead of standard models.
             When a model name in the mapping is referenced, the corresponding Model/string is used.
@@ -117,7 +127,6 @@ def claude_code(
         cwd: Working directory to run claude code within.
         env: Environment variables to set for claude code.
         user: User to execute claude code with.
-        debug: Add `--debug` cli flag. Verbose logging is always enabled.
         sandbox: Optional sandbox environment name.
         version: Version of claude code to use. One of:
             - "auto": Use any available version of claude code in the sandbox, otherwise download the current stable version.
@@ -125,17 +134,11 @@ def claude_code(
             - "stable": Download and use the current stable version of claude code.
             - "latest": Download and use the very latest version of claude code.
             - "x.x.x": Download and use a specific version of claude code.
+        debug: Add `--debug` cli flag and trace all debug output.
     """
     # resolve centaur
     if centaur is True:
         centaur = CentaurOptions()
-
-    # resolve models
-    model = f"inspect/{model}" if model is not None else "inspect"
-    opus_model = inspect_model(opus_model)
-    sonnet_model = inspect_model(sonnet_model)
-    haiku_model = inspect_model(haiku_model)
-    subagent_model = inspect_model(subagent_model)
 
     # resolve skills
     resolved_skills = read_skills(skills) if skills is not None else None
@@ -159,22 +162,50 @@ def claude_code(
         # bridge's ModelEventSink — the bridge hands us every ModelEvent
         # instead of emitting it to the transcript, and we attribute each
         # to the correct agent span using parent_tool_use_id from the JSONL
-        # stream. Captures the outer span_id (this @agent's span) so
-        # sub-agent spans we discover from JSONL can be parented correctly.
-        # See live_consumer.py for full mechanism.
-        consumer = LiveConsumer(outer_span_id=current_span_id())
+        # stream. The outer span (used for main-agent attribution and
+        # sub-agent span parenting) is resolved at emission time so it
+        # tracks the rotating checkpoint span. See live_consumer.py for
+        # full mechanism.
+        consumer = LiveConsumer()
 
-        async with sandbox_agent_bridge(
-            state,
-            model=model,
+        # Resolve the (cosmetic) model identities Claude Code presents to itself
+        # and the bridge aliases that route them to the real served model. The
+        # per-role env vars below carry the opus/sonnet/haiku/subagent names.
+        models = resolve_claude_code_models(
+            model,
+            model_config,
+            opus_model=opus_model,
+            sonnet_model=sonnet_model,
+            haiku_model=haiku_model,
+            subagent_model=subagent_model,
             model_aliases=model_aliases,
-            filter=filter,
-            sandbox=sandbox,
-            retry_refusals=retry_refusals,
-            port=port,
-            bridged_tools=bridged_tools,
-            model_event_sink=consumer,
-        ) as bridge:
+        )
+
+        async with (
+            checkpointer() as cp,
+            sandbox_agent_bridge(
+                state,
+                model=models.bridge_model,
+                model_aliases=models.aliases,
+                filter=filter,
+                sandbox=sandbox,
+                retry_refusals=retry_refusals,
+                port=port,
+                bridged_tools=bridged_tools,
+                model_event_sink=consumer,
+                checkpointer=cp,
+            ) as bridge,
+        ):
+            if cp.attempt == "resume_for_scoring":
+                return bridge.state
+
+            # restore session_id from checkpoint so --resume targets the
+            # session that exists in the restored sandbox
+            nonlocal session_id
+            session_id = cp.track(
+                "claude_code_session_id", lambda: session_id, session_id
+            )
+
             # ensure claude is installed and get binary location
             claude_binary = await ensure_agent_binary_installed(
                 claude_code_binary_source(), version, user, sandbox_env(sandbox)
@@ -190,7 +221,7 @@ def claude_code(
             cmd = [
                 *permission_flag,
                 "--model",
-                model,
+                models.presented,
             ]
 
             # add interactive options if not running as centaur
@@ -198,15 +229,6 @@ def claude_code(
                 cmd.extend(["--print", "--output-format", "stream-json", "--verbose"])
                 if debug:
                     cmd.append("--debug")
-
-            # system prompt
-            system_messages = [
-                m.text for m in state.messages if isinstance(m, ChatMessageSystem)
-            ]
-            if system_prompt is not None:
-                system_messages.append(system_prompt)
-            if system_messages:
-                cmd.extend(["--append-system-prompt", "\n\n".join(system_messages)])
 
             # mcp servers (combine static configs with bridged tools)
             cmd_allowed_tools: list[str] = []
@@ -231,24 +253,24 @@ def claude_code(
             # resolve sandbox
             sbox = sandbox_env(sandbox)
 
+            # resolve working directory (home dir if sandbox default is '/')
+            agent_cwd = await resolve_agent_cwd(sbox, user, cwd)
+
             # install skills
             if resolved_skills is not None:
-                CLAUDE_SKILLS = ".claude/skills"
-                skills_dir = (
-                    join_path(cwd, CLAUDE_SKILLS) if cwd is not None else CLAUDE_SKILLS
-                )
+                skills_dir = join_path(agent_cwd, ".claude/skills")
                 await install_skills(resolved_skills, sbox, user, skills_dir)
 
             # define agent env
             agent_env = {
                 "ANTHROPIC_BASE_URL": f"http://localhost:{bridge.port}",
                 "ANTHROPIC_AUTH_TOKEN": "sk-ant-api03-DOq5tyLPrk9M4hPE",
-                "ANTHROPIC_MODEL": model,
-                "ANTHROPIC_DEFAULT_OPUS_MODEL": opus_model or model,
-                "ANTHROPIC_DEFAULT_SONNET_MODEL": sonnet_model or model,
-                "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku_model or model,
-                "CLAUDE_CODE_SUBAGENT_MODEL": subagent_model or model,
-                "ANTHROPIC_SMALL_FAST_MODEL": haiku_model or model,
+                "ANTHROPIC_MODEL": models.presented,
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": models.opus,
+                "ANTHROPIC_DEFAULT_SONNET_MODEL": models.sonnet,
+                "ANTHROPIC_DEFAULT_HAIKU_MODEL": models.haiku,
+                "CLAUDE_CODE_SUBAGENT_MODEL": models.subagent,
+                "ANTHROPIC_SMALL_FAST_MODEL": models.haiku,
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
                 "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1",
                 "IS_SANDBOX": "1",
@@ -260,7 +282,7 @@ def claude_code(
             # output).  Providing an apiKeyHelper in settings.json
             # supplies a key through a path that does work.
             api_key = agent_env.get("ANTHROPIC_AUTH_TOKEN", "dummy-key-for-bridge")
-            await _seed_claude_config(sbox, api_key, user, cwd)
+            await _seed_claude_config(sbox, api_key, user, agent_cwd)
 
             # centaur mode uses human_cli with custom instructions and bash rc
             if centaur:
@@ -274,25 +296,55 @@ def claude_code(
                 # execute the agent (track debug output)
                 debug_output: list[str] = []
                 agent_prompt = prompt
-                attempt_count = 0
+                attempt_count = cp.track(
+                    "claude_code_attempt_count", lambda: attempt_count, 0
+                )
                 uncaught_error_count = 0
                 try:
                     while True:
-                        # resume previous conversation
-                        if (
+                        is_resume = (
                             has_assistant_response
                             or attempt_count > 0
                             or uncaught_error_count > 0
-                        ):
+                            or cp.attempt == "resume"
+                        )
+
+                        # System prompt is sent only when creating the session.
+                        # On resume the session already contains system messages, so send
+                        # nothing: the bridge round-trips Claude Code's own
+                        # system prompt back into state.messages as a
+                        # ChatMessageSystem, and re-passing it via
+                        # --append-system-prompt would duplicate the entire
+                        # system prompt on every resumed turn (the flag is
+                        # applied per-invocation, not persisted anyway).
+                        system_args: list[str] = []
+                        if not is_resume:
+                            system_texts = [
+                                m.text
+                                for m in state.messages
+                                if isinstance(m, ChatMessageSystem)
+                            ]
+                            if system_prompt is not None:
+                                system_texts.append(system_prompt)
+                            if system_texts:
+                                system_args = [
+                                    "--append-system-prompt",
+                                    "\n\n".join(system_texts),
+                                ]
+
+                        # resume previous conversation
+                        if is_resume:
                             agent_cmd = (
                                 [claude_binary, "--resume", session_id]
                                 + cmd
+                                + system_args
                                 + ["--", agent_prompt]
                             )
                         else:
                             agent_cmd = (
                                 [claude_binary, "--session-id", session_id]
                                 + cmd
+                                + system_args
                                 + ["--", agent_prompt]
                             )
 
@@ -310,7 +362,7 @@ def claude_code(
                             cmd=["bash", "-c", 'exec 0</dev/null; "$@"', "bash"]
                             + agent_cmd,
                             options=ExecRemoteStreamingOptions(
-                                cwd=cwd,
+                                cwd=agent_cwd,
                                 env=agent_env,
                                 user=user,
                                 concurrency=False,
@@ -328,9 +380,10 @@ def claude_code(
                                 if cc_debug is not None:
                                     cc_debug.stdout.append(cc_event.line)
                             elif isinstance(cc_event, JsonlParseError):
-                                debug_output.append(
-                                    f"JSONL parse error: {cc_event.line}"
-                                )
+                                if debug:
+                                    debug_output.append(
+                                        f"JSONL parse error: {cc_event.line}"
+                                    )
                             elif isinstance(cc_event, StderrEvent):
                                 stderr_data += cc_event.data
                                 if cc_debug is not None:
@@ -338,7 +391,8 @@ def claude_code(
                             elif isinstance(cc_event, ExitEvent):
                                 exit_code = cc_event.code
 
-                        debug_output.append(stderr_data)
+                        if debug:
+                            debug_output.append(stderr_data)
 
                         # raise for error
                         if exit_code != 0:
@@ -400,8 +454,9 @@ def claude_code(
                     consumer.reset()
 
                 # trace debug info
-                debug_output.insert(0, "Claude Code Debug Output:")
-                trace("\n".join(debug_output))
+                if debug:
+                    debug_output.insert(0, "Claude Code Debug Output:")
+                    trace("\n".join(debug_output))
 
         return bridge.state
 
@@ -413,7 +468,7 @@ async def _seed_claude_config(
     sbox: Any,
     api_key: str,
     user: str | None,
-    cwd: str | None,
+    cwd: str,
 ) -> None:
     """Write ~/.claude/settings.json with an apiKeyHelper.
 

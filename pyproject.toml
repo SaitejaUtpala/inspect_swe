@@ -1,5 +1,8 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+# Cap hatchling <1.30: 1.30.0 emits core metadata 2.5 (PEP 794), which PyPI
+# does not yet accept (https://github.com/pypi/warehouse/issues/19083).
+# Relax once warehouse supports metadata 2.5.
+requires = ["hatchling<1.30", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
@@ -12,7 +15,7 @@ requires-python = ">=3.10"
 license = { text = "MIT License" }
 dependencies = [
     "httpx",
-    "inspect_ai>=0.3.226",
+    "inspect_ai@git+https://github.com/UKGovernmentBEIS/inspect_ai@main",
     "nest_asyncio",
     "platformdirs",
     "pydantic>=2.13.0",
@@ -20,7 +23,7 @@ dependencies = [
     "sniffio",
     "anyio",
     "typing_extensions>=4.9.0",
-    "agent-client-protocol>=0.10.0",
+    "agent-client-protocol>=0.10.1",
 ]
 
 [project.urls]
