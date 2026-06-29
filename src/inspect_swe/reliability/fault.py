@@ -13,6 +13,7 @@ from inspect_ai.log import EvalLog
 from pydantic import BaseModel
 
 from .baseline import (
+    RELIABILITY_CODEX_CLI_VERSION,
     _benchmark_log_slug,
     _wrap_solver_with_confidence,
     assert_canonical_eval_log_path,
@@ -192,6 +193,7 @@ def _codex_cli_fault_kwargs(
     kwargs: dict[str, Any] = {
         "filter": fault_env.model_filter(),
         "retry_refusals": 3,
+        "version": RELIABILITY_CODEX_CLI_VERSION,
     }
     if config.replace_native_web_search:
         kwargs["bridged_tools"] = fault_env.wrap_bridged_tools(

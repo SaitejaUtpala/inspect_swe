@@ -6,6 +6,7 @@ from inspect_ai.model import (
     ModelOutput,
 )
 from inspect_swe.reliability.baseline import (
+    RELIABILITY_CODEX_CLI_VERSION,
     _benchmark_log_slug,
     _default_solver_for_agent,
 )
@@ -164,7 +165,7 @@ def test_codex_fault_kwargs_do_not_replace_web_search_by_default() -> None:
     )
 
     assert kwargs["retry_refusals"] == 3
-    assert "version" not in kwargs
+    assert kwargs["version"] == RELIABILITY_CODEX_CLI_VERSION
     assert "disallowed_tools" not in kwargs
     assert "bridged_tools" not in kwargs
 
@@ -175,7 +176,7 @@ def test_codex_fault_kwargs_replaces_native_web_search_only_when_enabled() -> No
         FaultPhaseConfig(replace_native_web_search=True),
     )
 
-    assert "version" not in kwargs
+    assert kwargs["version"] == RELIABILITY_CODEX_CLI_VERSION
     assert kwargs["disallowed_tools"] == ["web_search"]
     assert kwargs["bridged_tools"][0].name == "reliability_search"
 
@@ -192,7 +193,7 @@ def test_baseline_codex_default_uses_fresh_default_constructor(monkeypatch) -> N
     monkeypatch.setattr(inspect_swe, "codex_cli", fake_codex_cli)
 
     assert _default_solver_for_agent("codex_cli") is not None
-    assert "version" not in calls
+    assert calls["version"] == RELIABILITY_CODEX_CLI_VERSION
 
 
 def test_baseline_claude_default_uses_fresh_default_constructor(monkeypatch) -> None:

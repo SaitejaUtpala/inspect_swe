@@ -17,6 +17,8 @@ from pydantic import BaseModel, Field, field_validator
 from .concurrency import validate_orchestrator_policy
 from .spec import ReliabilitySpec
 
+RELIABILITY_CODEX_CLI_VERSION = "0.142.4"
+
 
 class BaselineExecutionError(RuntimeError):
     """Raised when reliability execution violates preflight constraints."""
@@ -199,7 +201,7 @@ def _default_solver_for_agent(agent: str) -> Any | None:
     if agent == "codex_cli":
         from inspect_swe import codex_cli
 
-        return codex_cli()
+        return codex_cli(version=RELIABILITY_CODEX_CLI_VERSION)
     if agent == "claude_code":
         from inspect_swe import claude_code
 

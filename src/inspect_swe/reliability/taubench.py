@@ -20,6 +20,7 @@ from inspect_evals.tau2.common.agents import (
 
 from inspect_swe import codex_cli
 
+from .baseline import RELIABILITY_CODEX_CLI_VERSION
 from .structural_perturbations import StructuralEnvironment
 
 
@@ -49,6 +50,7 @@ def tau2_airline_codex_solver(
     limit = message_limit or DEFAULT_MESSAGE_LIMIT
     kwargs = dict(codex_kwargs or {})
     kwargs.setdefault("retry_refusals", 3)
+    kwargs.setdefault("version", RELIABILITY_CODEX_CLI_VERSION)
     kwargs.setdefault("disallowed_tools", ["web_search"])
     kwargs["bridged_tools"] = tau2_airline_bridged_tools(structural_env)
     codex_agent = codex_cli(**kwargs)

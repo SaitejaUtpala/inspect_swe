@@ -8,7 +8,7 @@ cd "$REPO_ROOT"
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 MODEL="${MODEL:-anthropic/claude-opus-4-8}"
-GAIA_BENCHMARK="${GAIA_BENCHMARK:-inspect_evals/gaia}"
+GAIA_LEVEL="${GAIA_LEVEL:-gaia_level1}"
 LIMIT="${LIMIT:-3}"
 MAX_SAMPLES="${MAX_SAMPLES:-3}"
 REPEATS="${REPEATS:-1}"
@@ -24,12 +24,35 @@ RUN_STRUCTURAL="${RUN_STRUCTURAL:-1}"
 
 mkdir -p "$LOG_ROOT"
 
+DEFAULT_GAIA_BENCHMARK="$(
+  "$PYTHON_BIN" - "$GAIA_LEVEL" <<'PY'
+from pathlib import Path
+import importlib
+import sys
+
+gaia_module = importlib.import_module("inspect_evals.gaia.gaia")
+
+print(f"{Path(gaia_module.__file__)}@{sys.argv[1]}")
+PY
+)"
+GAIA_BENCHMARK="${GAIA_BENCHMARK:-$DEFAULT_GAIA_BENCHMARK}"
+
 echo "MODEL=$MODEL"
+echo "GAIA_LEVEL=$GAIA_LEVEL"
 echo "GAIA_BENCHMARK=$GAIA_BENCHMARK"
 echo "LIMIT=$LIMIT"
 echo "MAX_SAMPLES=$MAX_SAMPLES"
 echo "SANDBOX=$SANDBOX"
 echo "LOG_ROOT=$LOG_ROOT"
+
+if [[ -z "$GAIA_BENCHMARK" ]]; then
+  echo "Failed to resolve GAIA benchmark path. Is inspect_evals installed in this active environment?" >&2
+  exit 1
+fi
+if [[ ! -f "${GAIA_BENCHMARK%@*}" ]]; then
+  echo "Resolved GAIA module file does not exist: ${GAIA_BENCHMARK%@*}" >&2
+  exit 1
+fi
 
 if [[ "$RUN_BASELINE" == "1" ]]; then
   echo "Running Claude Code GAIA baseline: samples=$MAX_SAMPLES"

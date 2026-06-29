@@ -13,6 +13,7 @@ from inspect_ai.log import EvalLog
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .baseline import (
+    RELIABILITY_CODEX_CLI_VERSION,
     _benchmark_log_slug,
     _default_solver_for_agent,
     _wrap_solver_with_confidence,
@@ -276,6 +277,7 @@ def _default_structural_solver_for_agent(
                 filter=env.model_filter(),
                 bridged_tools=env.wrap_bridged_tools(config.bridged_tools),
                 retry_refusals=3,
+                version=RELIABILITY_CODEX_CLI_VERSION,
             )
         )
     solver_value = _default_solver_for_agent(agent)

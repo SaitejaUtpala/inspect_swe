@@ -36,6 +36,13 @@ def test_anthropic_provider_can_be_constructed_for_claude_code_models() -> None:
     assert model.name == "claude-opus-4-8"
 
 
+def test_openai_provider_can_be_constructed_for_codex_models() -> None:
+    """Fail fast when Inspect's OpenAI provider prerequisites are stale."""
+    model = get_model("openai/gpt-5.5")
+
+    assert model.name == "gpt-5.5"
+
+
 def test_sandbox_agent_bridge_supports_model_event_sink_kwarg() -> None:
     signature = inspect.signature(sandbox_agent_bridge)
 

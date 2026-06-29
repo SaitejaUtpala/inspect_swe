@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from inspect_ai.tool import Tool, ToolDef, ToolParams, tool
+from inspect_swe.reliability.baseline import RELIABILITY_CODEX_CLI_VERSION
 from inspect_swe.reliability.concurrency import OrchestratorConcurrency
 from inspect_swe.reliability.spec import ReliabilitySpec
 from inspect_swe.reliability.structural import (
@@ -301,7 +302,7 @@ def test_structural_codex_default_kwargs_follow_current_agent_api(monkeypatch) -
     assert callable(calls["filter"])
     assert calls["bridged_tools"] is None
     assert calls["retry_refusals"] == 3
-    assert "version" not in calls
+    assert calls["version"] == RELIABILITY_CODEX_CLI_VERSION
 
 
 def _capture_flight_tool(calls: dict[str, str]) -> Tool:
