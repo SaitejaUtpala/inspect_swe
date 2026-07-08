@@ -132,21 +132,88 @@ structural pass, because the clean baselines already exist. If you omit it, the
 structural runner will create a baseline and perturbed pair inside each
 structural campaign, which is easier to inspect but more expensive.
 
+## Codex GPT-5.5 GAIA and Tau2 Runner
+
+Use this script when you want the current Codex GPT-5.5 smoke across GAIA and
+Tau2. It resolves the GAIA and Tau2 task files from the active Python
+environment, so run it from the intended conda environment instead of wrapping it
+in `conda run`.
+
+```bash
+cd /Users/saitejautpala/work/hal_explore/inspect_swe_new/inspect_swe
+PYTHON_BIN=python LIMIT=15 MAX_SAMPLES=5 \
+  scripts/codex_gpt55_gaia_tau2_reliability.sh
+```
+
+The script runs:
+
+- GAIA baseline, structural `mild`/`medium`/`severe`, and
+  `exec_observation_error` faulting for Codex `exec_command`.
+- Tau2 Airline baseline and structural/environmental tool API perturbations.
+
+Tau2 fault is off by default because the main Tau2 environmental robustness path
+is the structural tool/API surface. To force a Tau2 `exec_command` fault run:
+
+```bash
+RUN_TAU2_FAULT=1 scripts/codex_gpt55_gaia_tau2_reliability.sh
+```
+
 Dump one `.eval` to JSON:
 
 ```bash
 conda run -n inspect_swe_new python -c "from inspect_ai.log import read_eval_log; from pathlib import Path; src=Path('<path-to-log.eval>'); src.with_suffix('.json').write_text(read_eval_log(str(src)).model_dump_json(indent=2), encoding='utf-8')"
 ```
 
+## Post-Hoc Answer Repair
+
+Some agents (notably Claude Code on GAIA) return the correct answer wrapped in
+extra explanation or filler text. GAIA scores strictly against an answer-only
+format, so those runs score as incorrect even when the answer is right. This is
+patched at the **solver level as a post-hoc repair**, not by changing the scorer
+and not by broad regex stripping.
+
+The `reliability/posthoc/` package is a generic, extensible framework:
+
+- `base.py` — `PostHocRepair` (a `name`, an async `repair(TaskState) -> TaskState`,
+  and the `agents` it applies to; empty means all) plus
+  `wrap_solver_with_posthoc(base_solver, repair)`.
+- `gaia.py` — `repair_gaia_answer` runs one reformatting model turn, sets
+  `state.output` to the cleaned answer for scoring, appends the repair turn to the
+  message history, and records the original + repaired completion under
+  `state.metadata["reliability_posthoc_repair"]`. Registered as
+  `GAIA_ANSWER_REPAIR`, scoped to `claude_code` only.
+- `registry.py` — `detect_dataset(benchmark)` maps a benchmark ref to a dataset
+  key, `POSTHOC_REPAIRS` maps dataset key to repair, and `apply_posthoc_repair`
+  is the single entry point the phase runners call.
+
+Phase runners stay dataset-agnostic: `baseline`, `fault`, and `structural` call
+`apply_posthoc_repair(...)` after the agent solver (and any fault/structural
+wrapping) and before confidence scoring, so the repair turn is never itself
+fault-injected or perturbed. Adding a new dataset repair is a new module plus one
+`POSTHOC_REPAIRS` entry; per-agent scoping lives on the repair. Repair is enabled
+by default and can be disabled with `--no-posthoc-repair` (config field
+`posthoc_repair`).
+
+## Tested Against
+
+- `inspect_swe` main `e0b8349` (`git describe 0.2.63-18-ge0b8349`, changelog
+  `0.2.65`); branch merge at `a74cea0`. Includes the Claude Code graceful-refusal
+  fix (a content-filter refusal scores incorrect and continues instead of
+  raising).
+- `inspect_ai 0.3.242`, `anthropic 0.112.0`, `openai 2.44.0`. Agent pins: Codex
+  CLI `0.142.4`, Claude Code `2.1.181`.
+
+The reliability package is branch-local custom code and must be preserved when
+merging upstream.
+
 ## What Has Been Tested
 
-- Reliability branch assessed against upstream `inspect_swe` `0.2.63-11-gf86c551`
-  (`upstream/main` commit `f86c551`, merge base `bc37fce`). The reliability
-  package is branch-local custom code and must be preserved when merging upstream.
-- Focused reliability tests pass: `33 passed`.
+- Focused reliability tests pass: `58 passed` (post-hoc repair, faults,
+  structural, Inspect AI compatibility, Claude Code exit handling).
 - Focused reliability tests cover Codex and Claude default solver construction,
   Codex structural wrapper kwargs, TauBench tool schema perturbation/reversal,
-  and exec-observation fault injection.
+  exec-observation fault injection, and post-hoc repair scoping (dataset + agent)
+  plus the GAIA answer-repair behavior.
 - Ruff checks pass for `src/inspect_swe/reliability` and the reliability tests.
 - GAIA Level 1, `codex_cli`, GPT-5.4, `limit=8`, `max_samples=4`, `p=0.8` completed successfully.
 - GAIA Level 1, `codex_cli`, GPT-5.5, `limit=12`, `max_samples=6`, `p=0.5` completed successfully.
@@ -158,6 +225,9 @@ conda run -n inspect_swe_new python -c "from inspect_ai.log import read_eval_log
   smoke confirmed `Bash` observations are faulted in the model-facing log view.
 - GAIA structural runs with `codex_cli` and GPT-5.5 have completed for
   `mild`, `medium`, and `severe` perturbation strengths on 10 examples.
+- Claude Code GAIA Level 1, Opus 4.8 baseline with post-hoc repair enabled,
+  `limit=15`, `max_samples=5`, completed cleanly (`gaia_scorer` accuracy `0.733`)
+  with no agent exit/refusal errors.
 
 ## Probability Semantics
 

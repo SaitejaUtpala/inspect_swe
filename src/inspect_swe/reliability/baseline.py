@@ -15,6 +15,7 @@ from inspect_ai.solver import Generate, Solver, TaskState, solver
 from pydantic import BaseModel, Field, field_validator
 
 from .concurrency import validate_orchestrator_policy
+from .posthoc import apply_posthoc_repair
 from .spec import ReliabilitySpec
 
 RELIABILITY_CODEX_CLI_VERSION = "0.142.4"
@@ -54,6 +55,7 @@ class BaselinePhaseConfig(BaseModel):
     limit: int | tuple[int, int] | None = None
     sample_id: str | int | list[str] | list[int] | list[str | int] | None = None
     compute_confidence: bool = True
+    posthoc_repair: bool = True
     taubench_codex_adapter: bool = False
     taubench_message_limit: int | None = None
 
@@ -184,6 +186,12 @@ def _run_single_repeat(
     if config.model is not None:
         eval_kwargs["model"] = config.model
     solver_value = config.solver or _default_solver_for_agent_with_config(agent, config)
+    solver_value = apply_posthoc_repair(
+        solver_value,
+        agent=agent,
+        benchmark=spec.benchmark,
+        enabled=config.posthoc_repair,
+    )
     if config.compute_confidence:
         solver_value = _wrap_solver_with_confidence(solver_value)
     if solver_value is not None:

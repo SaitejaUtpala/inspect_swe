@@ -20,6 +20,7 @@ from .baseline import (
     assert_canonical_eval_log_path,
 )
 from .concurrency import validate_orchestrator_policy
+from .posthoc import apply_posthoc_repair
 from .spec import ReliabilitySpec
 from .structural_perturbations import (
     StructuralContext,
@@ -46,6 +47,7 @@ class StructuralPhaseConfig(BaseModel):
     limit: int | tuple[int, int] | None = None
     sample_id: str | int | list[str] | list[int] | list[str | int] | None = None
     compute_confidence: bool = True
+    posthoc_repair: bool = True
     seed: int = 0
     strength: StructuralStrength = "medium"
     kind: StructuralKind = "gaia"
@@ -185,6 +187,12 @@ def _run_single_structural_eval(
         if is_agent(solver_value):
             solver_value = as_solver(solver_value)
         solver_value = env.wrap_solver(solver_value)
+    solver_value = apply_posthoc_repair(
+        solver_value,
+        agent=agent,
+        benchmark=spec.benchmark,
+        enabled=config.posthoc_repair,
+    )
     if config.compute_confidence:
         solver_value = _wrap_solver_with_confidence(solver_value)
 
