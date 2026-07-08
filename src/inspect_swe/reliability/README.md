@@ -194,17 +194,20 @@ fault-injected or perturbed. Adding a new dataset repair is a new module plus on
 by default and can be disabled with `--no-posthoc-repair` (config field
 `posthoc_repair`).
 
+## Tested Against
+
+- `inspect_swe` main `e0b8349` (`git describe 0.2.63-18-ge0b8349`, changelog
+  `0.2.65`); branch merge at `a74cea0`. Includes the Claude Code graceful-refusal
+  fix (a content-filter refusal scores incorrect and continues instead of
+  raising).
+- `inspect_ai 0.3.242`, `anthropic 0.112.0`, `openai 2.44.0`. Agent pins: Codex
+  CLI `0.142.4`, Claude Code `2.1.181`.
+
+The reliability package is branch-local custom code and must be preserved when
+merging upstream.
+
 ## What Has Been Tested
 
-- Reliability branch assessed against `inspect_swe` main at commit `e0b8349`
-  (`origin/main`, `git describe 0.2.63-18-ge0b8349`, changelog `0.2.65`), merged
-  into the reliability branch at `a74cea0`. This release includes the Claude Code
-  graceful-refusal fix (a content-filter refusal now scores incorrect and
-  continues, instead of raising). The reliability package is branch-local custom
-  code and must be preserved when merging upstream.
-- Dependency versions used for the runs below: `inspect_ai 0.3.242`,
-  `anthropic 0.112.0`, `openai 2.44.0`. Agent pins: Codex CLI `0.142.4`,
-  Claude Code `2.1.181`.
 - Focused reliability tests pass: `58 passed` (post-hoc repair, faults,
   structural, Inspect AI compatibility, Claude Code exit handling).
 - Focused reliability tests cover Codex and Claude default solver construction,
