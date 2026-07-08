@@ -21,6 +21,7 @@ from .baseline import (
 )
 from .concurrency import validate_orchestrator_policy
 from .faults import FaultContext, FaultEnvironment, FaultPhaseConfig
+from .posthoc import apply_posthoc_repair
 from .spec import ReliabilitySpec
 
 
@@ -97,6 +98,12 @@ def _run_single_fault_repeat(
     solver_value = config.solver or _default_fault_solver_for_agent(agent, fault_env, config)
     if solver_value is not None:
         solver_value = fault_env.wrap_solver(as_solver(solver_value))
+    solver_value = apply_posthoc_repair(
+        solver_value,
+        agent=agent,
+        benchmark=spec.benchmark,
+        enabled=config.posthoc_repair,
+    )
     if config.compute_confidence:
         solver_value = _wrap_solver_with_confidence(solver_value)
 

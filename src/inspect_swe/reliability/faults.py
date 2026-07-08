@@ -116,6 +116,7 @@ class FaultPhaseConfig(BaseModel):
     limit: int | tuple[int, int] | None = None
     sample_id: str | int | list[str] | list[int] | list[str | int] | None = None
     compute_confidence: bool = True
+    posthoc_repair: bool = True
     seed: int = 0
     faults: list[FaultSpec] = Field(default_factory=lambda: [FaultSpec()])
 

@@ -132,6 +132,32 @@ structural pass, because the clean baselines already exist. If you omit it, the
 structural runner will create a baseline and perturbed pair inside each
 structural campaign, which is easier to inspect but more expensive.
 
+## Codex GPT-5.5 GAIA and Tau2 Runner
+
+Use this script when you want the current Codex GPT-5.5 smoke across GAIA and
+Tau2. It resolves the GAIA and Tau2 task files from the active Python
+environment, so run it from the intended conda environment instead of wrapping it
+in `conda run`.
+
+```bash
+cd /Users/saitejautpala/work/hal_explore/inspect_swe_new/inspect_swe
+PYTHON_BIN=python LIMIT=15 MAX_SAMPLES=5 \
+  scripts/codex_gpt55_gaia_tau2_reliability.sh
+```
+
+The script runs:
+
+- GAIA baseline, structural `mild`/`medium`/`severe`, and
+  `exec_observation_error` faulting for Codex `exec_command`.
+- Tau2 Airline baseline and structural/environmental tool API perturbations.
+
+Tau2 fault is off by default because the main Tau2 environmental robustness path
+is the structural tool/API surface. To force a Tau2 `exec_command` fault run:
+
+```bash
+RUN_TAU2_FAULT=1 scripts/codex_gpt55_gaia_tau2_reliability.sh
+```
+
 Dump one `.eval` to JSON:
 
 ```bash

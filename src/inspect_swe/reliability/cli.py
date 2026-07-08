@@ -52,6 +52,14 @@ def _build_parser() -> argparse.ArgumentParser:
     campaign.add_argument("--inject-agent-task-arg", action="store_true")
     campaign.add_argument("--no-compute-confidence", action="store_true")
     campaign.add_argument(
+        "--no-posthoc-repair",
+        action="store_true",
+        help=(
+            "disable dataset-specific post-hoc answer repair (e.g. the "
+            "Claude Code GAIA answer-only reformatting pass)"
+        ),
+    )
+    campaign.add_argument(
         "--fault-surface",
         default="message",
         choices=["model", "message", "tool"],
@@ -115,6 +123,7 @@ def _run_campaign(args: argparse.Namespace) -> int:
         "limit": args.limit,
         "sample_id": _sample_id_arg(args.sample_id),
         "compute_confidence": not args.no_compute_confidence,
+        "posthoc_repair": not args.no_posthoc_repair,
     }
 
     output: dict[str, Any] = {}
