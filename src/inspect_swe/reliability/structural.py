@@ -16,6 +16,7 @@ from .baseline import (
     RELIABILITY_CODEX_CLI_VERSION,
     _benchmark_log_slug,
     _default_solver_for_agent,
+    _opencode_reliability_solver,
     _wrap_solver_with_confidence,
     assert_canonical_eval_log_path,
 )
@@ -269,6 +270,9 @@ def _default_structural_solver_for_agent(
             return tau2_airline_codex_solver(
                 message_limit=config.taubench_message_limit,
             )
+        if agent == "opencode":
+            solver_value = _opencode_reliability_solver(config.model)
+            return as_solver(solver_value) if is_agent(solver_value) else solver_value
         return _default_solver_for_agent(agent)
     if agent == "codex_cli":
         if config.taubench_codex_adapter:
@@ -288,6 +292,9 @@ def _default_structural_solver_for_agent(
                 version=RELIABILITY_CODEX_CLI_VERSION,
             )
         )
+    if agent == "opencode":
+        solver_value = _opencode_reliability_solver(config.model)
+        return as_solver(solver_value) if is_agent(solver_value) else solver_value
     solver_value = _default_solver_for_agent(agent)
     return as_solver(solver_value) if is_agent(solver_value) else solver_value
 

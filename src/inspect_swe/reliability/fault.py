@@ -16,6 +16,7 @@ from .baseline import (
     RELIABILITY_CLAUDE_CODE_VERSION,
     RELIABILITY_CODEX_CLI_VERSION,
     _benchmark_log_slug,
+    _opencode_reliability_solver,
     _wrap_solver_with_confidence,
     assert_canonical_eval_log_path,
 )
@@ -187,9 +188,10 @@ def _default_fault_solver_for_agent(
 
         return mini_swe_agent()
     if agent == "opencode":
-        from inspect_swe import opencode
-
-        return opencode()
+        return _opencode_reliability_solver(
+            config.model,
+            filter=fault_env.model_filter(),
+        )
     return None
 
 

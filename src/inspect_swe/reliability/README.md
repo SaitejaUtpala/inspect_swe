@@ -164,6 +164,49 @@ Dump one `.eval` to JSON:
 conda run -n inspect_swe_new python -c "from inspect_ai.log import read_eval_log; from pathlib import Path; src=Path('<path-to-log.eval>'); src.with_suffix('.json').write_text(read_eval_log(str(src)).model_dump_json(indent=2), encoding='utf-8')"
 ```
 
+## OpenCode GAIA Runner
+
+Use this script for the OpenCode GAIA level 1 sweep. OpenCode is wired for the
+**baseline, structural, and fault** phases. It resolves the GAIA task file from
+the active Python environment, so run it from the intended conda environment
+instead of wrapping it in `conda run`.
+
+```bash
+cd /Users/saitejautpala/work/hal_explore/inspect_swe_new/inspect_swe
+PYTHON_BIN=python LIMIT=10 MAX_SAMPLES=5 \
+  scripts/opencode_gaia_reliability.sh
+```
+
+The script runs (per model in `MODELS`):
+
+- GAIA baseline.
+- GAIA structural `mild`/`medium`/`severe` (prompt perturbations).
+- GAIA fault: `exec_observation_error` injected into opencode's shell tool
+  (opencode's shell tool is `bash`, so the fault target is `message.bash`).
+
+`MODELS` is a space-separated list of bridge models (default
+`anthropic/claude-opus-4-8 openai/gpt-5.5 google/gemini-3.5-flash`); each model
+gets its own log subfolder. The reliability solver matches `opencode_model` (the
+provider client opencode formats requests for) to each model's provider
+automatically, so mixing anthropic/openai/google needs no extra flags:
+
+```bash
+MODELS=google/gemini-3.5-flash RUN_STRUCTURAL=0 RUN_FAULT=0 \
+  scripts/opencode_gaia_reliability.sh
+```
+
+Toggle phases with `RUN_BASELINE` / `RUN_STRUCTURAL` / `RUN_FAULT`, and tune the
+fault with `FAULT_PROBABILITY` / `FAULT_MODE`. The opencode binary version is
+pinned via `RELIABILITY_OPENCODE_VERSION` in `reliability/baseline.py` for
+reproducibility.
+
+### Gemini via the bridge
+
+Running opencode with a `google/*` model needs `GOOGLE_API_KEY` set host-side
+(Inspect's Google provider reads `GOOGLE_API_KEY`, not `GEMINI_API_KEY`). The
+opencode agent supplies the sandbox-side placeholder key and the correct
+`/v1beta` bridge baseURL for the Google provider automatically.
+
 ## Post-Hoc Answer Repair
 
 Some agents (notably Claude Code on GAIA) return the correct answer wrapped in

@@ -8,8 +8,12 @@ from inspect_ai.model import (
 from inspect_swe.reliability.baseline import (
     RELIABILITY_CLAUDE_CODE_VERSION,
     RELIABILITY_CODEX_CLI_VERSION,
+    RELIABILITY_OPENCODE_VERSION,
+    BaselinePhaseConfig,
     _benchmark_log_slug,
     _default_solver_for_agent,
+    _default_solver_for_agent_with_config,
+    _opencode_model_for,
 )
 from inspect_swe.reliability.fault import (
     _codex_cli_fault_kwargs,
@@ -330,6 +334,46 @@ def test_baseline_claude_default_uses_fresh_default_constructor(monkeypatch) -> 
     assert calls == {"version": RELIABILITY_CLAUDE_CODE_VERSION}
 
 
+def test_opencode_model_for_matches_provider_and_defaults() -> None:
+    assert _opencode_model_for("openai/gpt-5.5") == "openai/gpt-5.5"
+    assert _opencode_model_for("anthropic/claude-opus-4-8") == "anthropic/claude-opus-4-8"
+    # No provider prefix / no model -> keep opencode's own default.
+    assert _opencode_model_for("bare-model") is None
+    assert _opencode_model_for(None) is None
+
+
+def test_baseline_opencode_default_pins_version_without_model(monkeypatch) -> None:
+    calls = {}
+
+    def fake_opencode(**kwargs):
+        calls.update(kwargs)
+        return object()
+
+    import inspect_swe
+
+    monkeypatch.setattr(inspect_swe, "opencode", fake_opencode)
+
+    assert _default_solver_for_agent("opencode") is not None
+    assert calls == {"version": RELIABILITY_OPENCODE_VERSION}
+
+
+def test_baseline_opencode_with_config_matches_model_provider(monkeypatch) -> None:
+    calls = {}
+
+    def fake_opencode(**kwargs):
+        calls.update(kwargs)
+        return object()
+
+    import inspect_swe
+
+    monkeypatch.setattr(inspect_swe, "opencode", fake_opencode)
+    config = BaselinePhaseConfig(model="openai/gpt-5.5", compute_confidence=False)
+
+    assert _default_solver_for_agent_with_config("opencode", config) is not None
+    assert calls["version"] == RELIABILITY_OPENCODE_VERSION
+    assert calls["opencode_model"] == "openai/gpt-5.5"
+
+
 def test_fault_claude_default_passes_filter_to_bridge_agent(monkeypatch) -> None:
     calls = {}
 
@@ -348,6 +392,62 @@ def test_fault_claude_default_passes_filter_to_bridge_agent(monkeypatch) -> None
     assert _default_fault_solver_for_agent("claude_code", env, FaultPhaseConfig()) is not None
     assert callable(calls["filter"])
     assert calls["version"] == RELIABILITY_CLAUDE_CODE_VERSION
+
+
+def test_fault_opencode_default_passes_filter_to_bridge_agent(monkeypatch) -> None:
+    calls = {}
+
+    def fake_opencode(**kwargs):
+        calls.update(kwargs)
+        return object()
+
+    import inspect_swe
+
+    monkeypatch.setattr(inspect_swe, "opencode", fake_opencode)
+    env = FaultEnvironment(
+        [FaultSpec(surface="message", mode="exec_observation_error", probability=1.0)],
+        _fault_context(agent="opencode"),
+    )
+
+    solver = _default_fault_solver_for_agent(
+        "opencode",
+        env,
+        FaultPhaseConfig(model="google/gemini-3.5-flash"),
+    )
+
+    assert solver is not None
+    assert callable(calls["filter"])
+    assert calls["version"] == RELIABILITY_OPENCODE_VERSION
+    assert calls["opencode_model"] == "google/gemini-3.5-flash"
+
+
+@pytest.mark.anyio
+async def test_exec_observation_error_faults_opencode_bash_tool_message() -> None:
+    spec = FaultSpec(surface="message", mode="exec_observation_error", probability=1.0)
+    env = FaultEnvironment([spec], _fault_context(agent="opencode"))
+    model = _CapturingModel()
+    observation = ChatMessageTool(
+        content="total 4\nfile.txt\n",
+        function="bash",
+        tool_call_id="call_bash",
+    )
+
+    result = await env.model_filter()(
+        model,
+        [ChatMessageUser(content="List files."), observation],
+        [],
+        None,
+        GenerateConfig(),
+    )
+
+    assert isinstance(result, ModelOutput)
+    assert model.last_input is not None
+    faulted_observation = model.last_input[-1]
+    assert isinstance(faulted_observation, ChatMessageTool)
+    assert faulted_observation.function == "bash"
+    assert faulted_observation.tool_call_id == "call_bash"
+    assert "bash: fork: Resource temporarily unavailable" in faulted_observation.text
+    assert "file.txt" not in faulted_observation.text
 
 
 def test_benchmark_log_slug_keeps_file_task_refs_under_log_root() -> None:

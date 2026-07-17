@@ -20,6 +20,37 @@ from .spec import ReliabilitySpec
 
 RELIABILITY_CODEX_CLI_VERSION = "0.142.4"
 RELIABILITY_CLAUDE_CODE_VERSION = "2.1.181"
+RELIABILITY_OPENCODE_VERSION = "1.18.2"
+
+
+def _opencode_model_for(model: str | None) -> str | None:
+    """Pick the ``opencode_model`` (provider client) for a bridge model.
+
+    OpenCode uses ``opencode_model`` only to choose which provider client formats
+    the request; the actual generation still goes through the Inspect bridge to
+    ``model``. Matching the provider keeps request formatting aligned with the
+    underlying model (e.g. openai/* vs anthropic/*).
+    """
+    if model and "/" in model:
+        return model
+    return None
+
+
+def _opencode_reliability_solver(model: str | None, *, filter: Any | None = None) -> Any:
+    """Construct the pinned opencode agent used across reliability phases.
+
+    ``filter`` is the bridged-model filter used by the fault phase to inject
+    faults into opencode's model traffic; baseline/structural pass ``None``.
+    """
+    from inspect_swe import opencode
+
+    kwargs: dict[str, Any] = {"version": RELIABILITY_OPENCODE_VERSION}
+    opencode_model = _opencode_model_for(model)
+    if opencode_model is not None:
+        kwargs["opencode_model"] = opencode_model
+    if filter is not None:
+        kwargs["filter"] = filter
+    return opencode(**kwargs)
 
 
 class BaselineExecutionError(RuntimeError):
@@ -224,9 +255,7 @@ def _default_solver_for_agent(agent: str) -> Any | None:
 
         return mini_swe_agent()
     if agent == "opencode":
-        from inspect_swe import opencode
-
-        return opencode()
+        return _opencode_reliability_solver(None)
     return None
 
 
@@ -240,6 +269,8 @@ def _default_solver_for_agent_with_config(
         return tau2_airline_codex_solver(
             message_limit=config.taubench_message_limit,
         )
+    if agent == "opencode":
+        return _opencode_reliability_solver(config.model)
     return _default_solver_for_agent(agent)
 
 
