@@ -58,6 +58,7 @@ EXEC_OBSERVATION_ERROR = "bash: fork: Resource temporarily unavailable"
 EXEC_OBSERVATION_TOOL_FUNCTIONS_BY_AGENT = {
     "codex_cli": frozenset({"exec_command"}),
     "claude_code": frozenset({"Bash"}),
+    "opencode": frozenset({"bash"}),
 }
 EXEC_OBSERVATION_TOOL_FUNCTIONS = frozenset(
     function

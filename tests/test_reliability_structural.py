@@ -5,7 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 from inspect_ai.tool import Tool, ToolDef, ToolParams, tool
-from inspect_swe.reliability.baseline import RELIABILITY_CODEX_CLI_VERSION
+from inspect_swe.reliability.baseline import (
+    RELIABILITY_CODEX_CLI_VERSION,
+    RELIABILITY_OPENCODE_VERSION,
+)
 from inspect_swe.reliability.concurrency import OrchestratorConcurrency
 from inspect_swe.reliability.spec import ReliabilitySpec
 from inspect_swe.reliability.structural import (
@@ -303,6 +306,39 @@ def test_structural_codex_default_kwargs_follow_current_agent_api(monkeypatch) -
     assert calls["bridged_tools"] is None
     assert calls["retry_refusals"] == 3
     assert calls["version"] == RELIABILITY_CODEX_CLI_VERSION
+
+
+@pytest.mark.parametrize("perturbed", [True, False])
+def test_structural_opencode_uses_pinned_version_and_provider_model(
+    monkeypatch, perturbed: bool
+) -> None:
+    calls = {}
+
+    def fake_opencode(**kwargs):
+        calls.update(kwargs)
+        return "opencode-agent"
+
+    monkeypatch.setattr("inspect_swe.opencode", fake_opencode)
+    env = StructuralEnvironment(
+        kind="gaia",
+        strength="medium",
+        context=StructuralContext(campaign_id="campaign", agent="opencode", repeat_id=0),
+    )
+
+    solver = _default_structural_solver_for_agent(
+        "opencode",
+        env,
+        StructuralPhaseConfig(
+            kind="gaia",
+            model="anthropic/claude-opus-4-8",
+            compute_confidence=False,
+        ),
+        perturbed=perturbed,
+    )
+
+    assert solver == "opencode-agent"
+    assert calls["version"] == RELIABILITY_OPENCODE_VERSION
+    assert calls["opencode_model"] == "anthropic/claude-opus-4-8"
 
 
 def _capture_flight_tool(calls: dict[str, str]) -> Tool:
