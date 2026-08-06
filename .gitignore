@@ -212,6 +212,12 @@ src/inspect_swe/_version.py
 # Inspect logs
 logs*/
 
+# Local experiment tasks
+slice_tests/
+
+# Local screenshots/assets
+assets/
+
 # MacOS
 .DS_Store
 
