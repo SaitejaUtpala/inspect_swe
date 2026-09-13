@@ -99,6 +99,9 @@ def opencode(
             - "sandbox": Use sandbox version (raises RuntimeError if not available)
             - "stable"/"latest": Download and use the latest version
             - "x.x.x": Download and use a specific version
+            The prompt is delivered on stdin, which needs opencode >= 1.14.42;
+            earlier versions prepend a newline to piped input (only reachable
+            with an older opencode pre-installed in the sandbox).
         debug: Trace all debug output.
     """
     # resolve centaur
@@ -190,8 +193,8 @@ def opencode(
                 )
             await sbox.write_file(opencode_config_path, json.dumps(opencode_config))
 
-            # build system prompt (opencode run takes a single positional message
-            # and has no separate --system-prompt flag, so we prepend)
+            # build system prompt (opencode run takes a single message and has no
+            # separate --system-prompt flag, so we prepend)
             system_messages = [
                 m.text for m in state.messages if isinstance(m, ChatMessageSystem)
             ]
@@ -277,9 +280,6 @@ def opencode(
                     if has_assistant_response or attempt_count > 0:
                         agent_cmd.append("--continue")
 
-                    # add prompt as positional argument at the end
-                    agent_cmd.append(agent_prompt)
-
                     # Retry-loop gate: fires ONLY when this loop is actually
                     # retrying (attempt_count > 0), so the cold-start
                     # pre-centaur gate is not paid for twice on the first
@@ -293,10 +293,27 @@ def opencode(
                             required=True,
                         )
 
+                    # Deliver the prompt on stdin rather than as a positional
+                    # argument. `opencode run` quote-wraps a positional message
+                    # that contains spaces and backslash-escapes the double
+                    # quotes inside it (packages/opencode/src/cli/cmd/run.ts),
+                    # so a prompt passed as an argument reaches the model -- and
+                    # crosses the agent bridge -- as `"..."` with `\"` inside
+                    # rather than as the task input. The bridge anchors
+                    # main-thread tracking on the task input, and for prompts
+                    # containing `"` that mismatch let opencode's session-title
+                    # generation call displace the agent's answer as the sample
+                    # output. Piped stdin is used verbatim (`resolveRunInput`,
+                    # opencode >= 1.14.42; earlier versions prepend "\n" to it,
+                    # which only costs exact-match anchoring for prompts under
+                    # the bridge's 20-char containment floor), and also
+                    # sidesteps argv length limits for long prompts.
+                    # exec_remote closes stdin after writing `input`, giving
+                    # opencode the EOF it needs.
                     result = await sbox.exec_remote(
-                        cmd=["bash", "-c", 'exec 0</dev/null; "$@"', "bash"]
-                        + agent_cmd,
+                        cmd=agent_cmd,
                         options=ExecRemoteAwaitableOptions(
+                            input=agent_prompt,
                             cwd=agent_cwd,
                             env=agent_env,
                             user=user,
