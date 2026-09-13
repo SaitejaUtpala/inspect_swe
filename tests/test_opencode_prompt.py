@@ -135,6 +135,46 @@ def test_system_prompt_is_prepended_within_stdin(
     assert "--continue" not in call["cmd"]
 
 
+def test_no_session_title_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Default is opt-in: opencode's normal title generation is untouched.
+    sbox = run_opencode(monkeypatch, [ChatMessageUser(content=PROMPT)])
+
+    (call,) = sbox.exec_remote_calls
+    assert "--title" not in call["cmd"]
+
+
+def test_session_title_is_passed_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A supplied title is passed as `--title <value>`, which makes opencode's
+    # session title non-default and skips its automatic title-generation call.
+    sbox = run_opencode(
+        monkeypatch, [ChatMessageUser(content=PROMPT)], session_title="my run"
+    )
+
+    (call,) = sbox.exec_remote_calls
+    cmd = call["cmd"]
+    assert cmd[cmd.index("--title") + 1] == "my run"
+
+
+def test_session_title_is_passed_on_continuation_turns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # `--title` coexists with `--continue`; opencode ignores it when resuming.
+    sbox = run_opencode(
+        monkeypatch,
+        [
+            ChatMessageUser(content="first"),
+            ChatMessageAssistant(content="ok"),
+            ChatMessageUser(content=PROMPT),
+        ],
+        session_title="my run",
+    )
+
+    (call,) = sbox.exec_remote_calls
+    cmd = call["cmd"]
+    assert "--continue" in cmd
+    assert cmd[cmd.index("--title") + 1] == "my run"
+
+
 def test_continuation_turn_uses_stdin_too(monkeypatch: pytest.MonkeyPatch) -> None:
     sbox = run_opencode(
         monkeypatch,
